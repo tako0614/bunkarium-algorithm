@@ -87,6 +87,10 @@ export interface CandidateFeatures {
   embedding?: number[]
   /** PRS（Personal Relevance Score） - 事前計算済み */
   prs?: number
+  /** PRSの根拠（任意） */
+  prsSource?: 'saved' | 'liked' | 'following'
+  /** 公開メトリクス（説明用、任意） */
+  publicMetrics?: PublicMetrics
 }
 
 export interface CVSComponents {
