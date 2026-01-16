@@ -3,11 +3,12 @@ import type {
   RankedItem,
   AlgorithmParams,
   ConstraintsReport,
-  ReasonCode,
-  DEFAULT_PARAMS
+  ReasonCode
 } from '../types'
-import { calculateMixedScore } from './scoring'
+import { DEFAULT_PARAMS } from '../types'
+import { calculateMixedScore, calculatePenalty } from './scoring'
 import { determineReasonCodes } from './explain'
+import { DIVERSITY_DEFAULTS } from './defaults'
 
 /**
  * 多様性制約付き再ランキング
@@ -27,9 +28,40 @@ interface RerankOptions {
 }
 
 const DEFAULT_RERANK_OPTIONS: RerankOptions = {
-  diversityCapN: 20,
-  diversityCapK: 5,
-  explorationBudget: 0.15
+  diversityCapN: DIVERSITY_DEFAULTS.diversityCapN,
+  diversityCapK: DIVERSITY_DEFAULTS.diversityCapK,
+  explorationBudget: DIVERSITY_DEFAULTS.explorationBudget
+}
+
+function applySimilarityPenalty(
+  candidate: Candidate & { score: ReturnType<typeof calculateMixedScore> },
+  selectedItems: Candidate[]
+): { adjustedScore: number; adjustedBreakdown: typeof candidate.score.breakdown } {
+  if (selectedItems.length === 0) {
+    return {
+      adjustedScore: candidate.score.finalScore,
+      adjustedBreakdown: candidate.score.breakdown
+    }
+  }
+
+  const penaltyWithExisting = calculatePenalty(candidate, selectedItems)
+  const basePenalty = candidate.score.breakdown.penalty
+  const similarityPenalty = Math.max(0, penaltyWithExisting - basePenalty)
+
+  if (similarityPenalty === 0) {
+    return {
+      adjustedScore: candidate.score.finalScore,
+      adjustedBreakdown: candidate.score.breakdown
+    }
+  }
+
+  return {
+    adjustedScore: candidate.score.finalScore - similarityPenalty,
+    adjustedBreakdown: {
+      ...candidate.score.breakdown,
+      penalty: basePenalty + similarityPenalty
+    }
+  }
 }
 
 /**
@@ -106,8 +138,13 @@ export function diversityRerank(
       const idx = remaining.findIndex(c => c.itemKey === explorationItem.itemKey)
       if (idx !== -1) {
         remaining.splice(idx, 1)
+        const { adjustedScore, adjustedBreakdown } = applySimilarityPenalty(
+          explorationItem,
+          result
+        )
         result.push({
           ...explorationItem,
+          score: { finalScore: adjustedScore, breakdown: adjustedBreakdown },
           reasonCodes: ['EXPLORATION', 'DIVERSITY_SLOT']
         })
         clusterCounts[explorationItem.clusterId] = (clusterCounts[explorationItem.clusterId] || 0) + 1
@@ -118,6 +155,9 @@ export function diversityRerank(
 
     // 通常の選択
     let selectedIdx = -1
+    let bestScore = -Infinity
+    let bestBreakdown: ReturnType<typeof calculateMixedScore>['breakdown'] | null = null
+
     for (let i = 0; i < remaining.length; i++) {
       const candidate = remaining[i]
       const currentClusterCount = clusterCounts[candidate.clusterId] || 0
@@ -128,13 +168,29 @@ export function diversityRerank(
         continue
       }
 
-      selectedIdx = i
-      break
+      const { adjustedScore, adjustedBreakdown } = applySimilarityPenalty(candidate, result)
+      if (adjustedScore > bestScore) {
+        bestScore = adjustedScore
+        bestBreakdown = adjustedBreakdown
+        selectedIdx = i
+      }
     }
 
     if (selectedIdx === -1) {
       // 全候補がクラスタ上限に達した場合、最高スコアを選択
-      selectedIdx = 0
+      for (let i = 0; i < remaining.length; i++) {
+        const candidate = remaining[i]
+        const { adjustedScore, adjustedBreakdown } = applySimilarityPenalty(candidate, result)
+        if (adjustedScore > bestScore) {
+          bestScore = adjustedScore
+          bestBreakdown = adjustedBreakdown
+          selectedIdx = i
+        }
+      }
+    }
+
+    if (selectedIdx === -1) {
+      break
     }
 
     const selected = remaining[selectedIdx]
@@ -143,8 +199,13 @@ export function diversityRerank(
     // 理由コード決定
     const reasonCodes = determineReasonCodes(selected, clusterCounts)
 
+    const adjustedBreakdown = bestBreakdown ?? selected.score.breakdown
+    const adjustedScore = Number.isFinite(bestScore)
+      ? bestScore
+      : selected.score.finalScore
     result.push({
       ...selected,
+      score: { finalScore: adjustedScore, breakdown: adjustedBreakdown },
       reasonCodes
     })
 
@@ -176,10 +237,10 @@ export function rank(
   params: Partial<AlgorithmParams> = {}
 ): { ranked: RankedItem[]; constraintsReport: ConstraintsReport } {
   const fullParams = {
-    diversityCapN: params.diversityCapN ?? 20,
-    diversityCapK: params.diversityCapK ?? 5,
-    explorationBudget: params.explorationBudget ?? 0.15,
-    weights: params.weights ?? { prs: 0.55, cvs: 0.25, dns: 0.20 }
+    diversityCapN: params.diversityCapN ?? DEFAULT_PARAMS.diversityCapN,
+    diversityCapK: params.diversityCapK ?? DEFAULT_PARAMS.diversityCapK,
+    explorationBudget: params.explorationBudget ?? DEFAULT_PARAMS.explorationBudget,
+    weights: params.weights ?? DEFAULT_PARAMS.weights
   }
 
   // 1. 一次ランキング

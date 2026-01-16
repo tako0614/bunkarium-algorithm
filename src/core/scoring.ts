@@ -1,10 +1,6 @@
-import type {
-  Candidate,
-  ScoreWeights,
-  ScoreBreakdown,
-  CVSComponents,
-  DEFAULT_PARAMS
-} from '../types'
+import type { Candidate, ScoreWeights, ScoreBreakdown, CVSComponents } from '../types'
+import { DEFAULT_PARAMS } from '../types'
+import { SCORING_DEFAULTS } from './defaults'
 
 /**
  * スコアリング
@@ -25,11 +21,11 @@ export interface CVSWeights {
 }
 
 export const DEFAULT_CVS_WEIGHTS: CVSWeights = {
-  like: 1.0,
-  context: 1.5,
-  collection: 1.2,
-  bridge: 2.0,
-  sustain: 0.5
+  like: SCORING_DEFAULTS.cvsComponentWeights.likeSignal,
+  context: SCORING_DEFAULTS.cvsComponentWeights.contextSignal,
+  collection: SCORING_DEFAULTS.cvsComponentWeights.collectionSignal,
+  bridge: SCORING_DEFAULTS.cvsComponentWeights.bridgeSignal,
+  sustain: SCORING_DEFAULTS.cvsComponentWeights.sustainSignal
 }
 
 /**
@@ -71,12 +67,13 @@ export function calculateDNS(
 
   // クラスタの新規性（直近で見ていないクラスタほど高い）
   const clusterExposureCount = recentClusterExposures[candidate.clusterId] || 0
-  const clusterNovelty = 1 / (1 + clusterExposureCount * 0.2)
+  const clusterNovelty =
+    1 / (1 + clusterExposureCount * SCORING_DEFAULTS.clusterExposurePenaltyFactor)
   score += clusterNovelty * 0.6
 
   // 時間的新規性（新しいコンテンツほど高い）
   const ageHours = (nowTs - candidate.createdAt) / (1000 * 60 * 60)
-  const timeNovelty = Math.exp(-ageHours / 168) // 7日で半減
+  const timeNovelty = Math.exp(-ageHours / SCORING_DEFAULTS.timeDecayHalfLifeHours)
   score += timeNovelty * 0.4
 
   return score
@@ -133,7 +130,7 @@ export function calculateMixedScore(
   recentClusterExposures: Record<string, number>,
   existingItems: Candidate[],
   nowTs: number,
-  weights: ScoreWeights = { prs: 0.55, cvs: 0.25, dns: 0.20 }
+  weights: ScoreWeights = DEFAULT_PARAMS.weights
 ): { finalScore: number; breakdown: ScoreBreakdown } {
   // PRS（事前計算済みを使用、なければ0）
   const prs = candidate.features.prs ?? 0

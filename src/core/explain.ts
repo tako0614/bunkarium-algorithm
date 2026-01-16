@@ -1,4 +1,5 @@
-import type { Candidate, ReasonCode, REASON_DESCRIPTIONS } from '../types'
+import type { Candidate, ReasonCode } from '../types'
+import { EXPLAIN_THRESHOLDS } from './defaults'
 
 /**
  * 理由コード生成（Explain）
@@ -19,30 +20,51 @@ export function determineReasonCodes(
 ): ReasonCode[] {
   const codes: ReasonCode[] = []
   const { features } = candidate
+  const thresholds = EXPLAIN_THRESHOLDS
 
   // CVSコンポーネントに基づく理由
-  if (features.cvsComponents.contextSignal > 0.5) {
+  if (features.cvsComponents.contextSignal >= thresholds.contextSignalThreshold) {
     codes.push('GROWING_CONTEXT')
   }
 
-  if (features.cvsComponents.bridgeSignal > 0.5) {
+  if (features.cvsComponents.bridgeSignal >= thresholds.bridgeSignalThreshold) {
     codes.push('BRIDGE_SUCCESS')
   }
 
   // 支持密度が高い
-  if (features.cvsComponents.likeSignal > 1.0) {
+  const derivedSupportDensity =
+    features.publicMetrics?.supportDensity ??
+    (features.uniqueViews > 0
+      ? features.cvsComponents.likeSignal / features.uniqueViews
+      : undefined)
+  if (derivedSupportDensity !== undefined) {
+    if (derivedSupportDensity >= thresholds.supportDensityThreshold) {
+      codes.push('HIGH_SUPPORT_DENSITY')
+    }
+  } else if (features.cvsComponents.likeSignal > 1.0) {
     codes.push('HIGH_SUPPORT_DENSITY')
   }
 
   // クラスタの新規性
   const clusterExposure = clusterCounts[candidate.clusterId] || 0
-  if (clusterExposure === 0) {
+  if (clusterExposure < thresholds.newClusterExposureThreshold) {
     codes.push('NEW_IN_CLUSTER')
   }
 
   // PRSが高い場合（個人適合）
-  if (features.prs && features.prs > 0.7) {
-    codes.push('SIMILAR_TO_SAVED')
+  if (features.prs && features.prs >= thresholds.prsSimilarityThreshold) {
+    switch (features.prsSource) {
+      case 'liked':
+        codes.push('SIMILAR_TO_LIKED')
+        break
+      case 'following':
+        codes.push('FOLLOWING')
+        break
+      case 'saved':
+      default:
+        codes.push('SIMILAR_TO_SAVED')
+        break
+    }
   }
 
   // 最低1つは理由を付ける
