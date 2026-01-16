@@ -1,0 +1,17 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+.wrangler/
+
+# Environment
+.env
+.env.local
+.dev.vars
+
+# Logs
+*.log
+
+# Bun
+bun.lockb
