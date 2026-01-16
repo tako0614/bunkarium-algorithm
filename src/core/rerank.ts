@@ -3,27 +3,23 @@ import type {
   RankedItem,
   AlgorithmParams,
   ConstraintsReport,
-  ReasonCode
+  ReasonCode,
+  RankRequest,
+  RankResponse
 } from '../types'
 import { DEFAULT_PARAMS } from '../types'
-import { calculateMixedScore, calculatePenalty } from './scoring'
+import { ALGORITHM_ID, ALGORITHM_VERSION } from '../constants'
+import { calculateMixedScore } from './scoring'
 import { determineReasonCodes } from './explain'
 import { DIVERSITY_DEFAULTS } from './defaults'
-
-/**
- * 多様性制約付き再ランキング
- *
- * - 一次ランキングをそのまま表示しない（必ず再ランキング）
- * - 直近N件に対し、同一クラスタの露出上限K
- * - 探索枠（Exploration Budget）を必ず混ぜる
- */
+import { cosineSimilarity } from './diversity'
 
 interface RerankOptions {
-  /** 直近N件 */
+  /** Window size for rerank. */
   diversityCapN: number
-  /** 同一クラスタ上限K */
+  /** Max items per cluster. */
   diversityCapK: number
-  /** 探索枠（0.0〜1.0） */
+  /** Exploration budget (0.0-1.0). */
   explorationBudget: number
 }
 
@@ -31,6 +27,21 @@ const DEFAULT_RERANK_OPTIONS: RerankOptions = {
   diversityCapN: DIVERSITY_DEFAULTS.diversityCapN,
   diversityCapK: DIVERSITY_DEFAULTS.diversityCapK,
   explorationBudget: DIVERSITY_DEFAULTS.explorationBudget
+}
+
+const SIMILARITY_PENALTY_WEIGHT = 0.3
+
+function calculateSimilarityPenalty(candidate: Candidate, selectedItems: Candidate[]): number {
+  if (!candidate.features.embedding || selectedItems.length === 0) return 0
+
+  let maxSimilarity = 0
+  for (const item of selectedItems) {
+    if (!item.features.embedding) continue
+    const sim = cosineSimilarity(candidate.features.embedding, item.features.embedding)
+    maxSimilarity = Math.max(maxSimilarity, sim)
+  }
+
+  return maxSimilarity * SIMILARITY_PENALTY_WEIGHT
 }
 
 function applySimilarityPenalty(
@@ -44,11 +55,8 @@ function applySimilarityPenalty(
     }
   }
 
-  const penaltyWithExisting = calculatePenalty(candidate, selectedItems)
-  const basePenalty = candidate.score.breakdown.penalty
-  const similarityPenalty = Math.max(0, penaltyWithExisting - basePenalty)
-
-  if (similarityPenalty === 0) {
+  const similarityPenalty = calculateSimilarityPenalty(candidate, selectedItems)
+  if (similarityPenalty <= 0) {
     return {
       adjustedScore: candidate.score.finalScore,
       adjustedBreakdown: candidate.score.breakdown
@@ -59,19 +67,13 @@ function applySimilarityPenalty(
     adjustedScore: candidate.score.finalScore - similarityPenalty,
     adjustedBreakdown: {
       ...candidate.score.breakdown,
-      penalty: basePenalty + similarityPenalty
+      penalty: candidate.score.breakdown.penalty + similarityPenalty
     }
   }
 }
 
 /**
- * 一次ランキングを実行
- *
- * @param candidates - 候補一覧
- * @param recentClusterExposures - 直近クラスタ露出
- * @param nowTs - 現在時刻
- * @param weights - スコア重み
- * @returns スコア付き候補（降順ソート済み）
+ * Primary ranking pass.
  */
 export function primaryRank(
   candidates: Candidate[],
@@ -84,25 +86,26 @@ export function primaryRank(
     score: calculateMixedScore(
       candidate,
       recentClusterExposures,
-      [], // 一次ランキングでは既存アイテムなし
       nowTs,
       weights
     )
   }))
 
-  // 降順ソート
-  scored.sort((a, b) => b.score.finalScore - a.score.finalScore)
+  scored.sort((a, b) => {
+    const scoreDelta = b.score.finalScore - a.score.finalScore
+    if (scoreDelta !== 0) return scoreDelta
+
+    const createdDelta = b.createdAt - a.createdAt
+    if (createdDelta !== 0) return createdDelta
+
+    return a.itemKey.localeCompare(b.itemKey)
+  })
 
   return scored
 }
 
 /**
- * 多様性制約付き再ランキング
- *
- * @param scoredCandidates - スコア付き候補（一次ランキング済み）
- * @param recentClusterExposures - 直近クラスタ露出
- * @param options - 再ランキングオプション
- * @returns 再ランキング結果と制約レポート
+ * Diversity-aware rerank.
  */
 export function diversityRerank(
   scoredCandidates: Array<Candidate & { score: ReturnType<typeof calculateMixedScore> }>,
@@ -118,7 +121,6 @@ export function diversityRerank(
   let clusterCapsApplied = 0
   let explorationSlotsUsed = 0
 
-  // 探索枠の数を計算
   const explorationSlotCount = Math.max(
     0,
     Math.min(diversityCapN, Math.floor(diversityCapN * explorationBudget))
@@ -127,13 +129,11 @@ export function diversityRerank(
     ? Math.max(1, Math.floor(diversityCapN / (explorationSlotCount + 1)))
     : 0
 
-  // 探索候補を抽出（露出が少ないクラスタから）
   const explorationCandidates = remaining
     .filter(c => (clusterCounts[c.clusterId] || 0) === 0)
     .slice(0, explorationSlotCount)
 
   while (result.length < diversityCapN && remaining.length > 0) {
-    // 探索枠を強制挿入（一定間隔で）
     const shouldInsertExploration =
       explorationSlotsUsed < explorationSlotCount &&
       explorationInterval > 0 &&
@@ -160,7 +160,6 @@ export function diversityRerank(
       }
     }
 
-    // 通常の選択
     let selectedIdx = -1
     let bestScore = -Infinity
     let bestBreakdown: ReturnType<typeof calculateMixedScore>['breakdown'] | null = null
@@ -169,7 +168,6 @@ export function diversityRerank(
       const candidate = remaining[i]
       const currentClusterCount = clusterCounts[candidate.clusterId] || 0
 
-      // クラスタ上限チェック
       if (currentClusterCount >= diversityCapK) {
         clusterCapsApplied++
         continue
@@ -184,7 +182,6 @@ export function diversityRerank(
     }
 
     if (selectedIdx === -1) {
-      // 全候補がクラスタ上限に達した場合、最高スコアを選択
       for (let i = 0; i < remaining.length; i++) {
         const candidate = remaining[i]
         const { adjustedScore, adjustedBreakdown } = applySimilarityPenalty(candidate, result)
@@ -203,7 +200,6 @@ export function diversityRerank(
     const selected = remaining[selectedIdx]
     remaining.splice(selectedIdx, 1)
 
-    // 理由コード決定
     const reasonCodes = determineReasonCodes(selected, clusterCounts)
 
     const adjustedBreakdown = bestBreakdown ?? selected.score.breakdown
@@ -229,47 +225,42 @@ export function diversityRerank(
 }
 
 /**
- * 完全なランキングパイプライン
- *
- * @param candidates - 候補一覧
- * @param recentClusterExposures - 直近クラスタ露出
- * @param nowTs - 現在時刻
- * @param params - アルゴリズムパラメータ
- * @returns ランキング結果
+ * Full ranking pipeline.
  */
-export function rank(
-  candidates: Candidate[],
-  recentClusterExposures: Record<string, number>,
-  nowTs: number,
-  params: Partial<AlgorithmParams> = {}
-): { ranked: RankedItem[]; constraintsReport: ConstraintsReport } {
-  const fullParams = {
-    diversityCapN: params.diversityCapN ?? DEFAULT_PARAMS.diversityCapN,
-    diversityCapK: params.diversityCapK ?? DEFAULT_PARAMS.diversityCapK,
-    explorationBudget: params.explorationBudget ?? DEFAULT_PARAMS.explorationBudget,
-    weights: params.weights ?? DEFAULT_PARAMS.weights
+export function rank(request: RankRequest): RankResponse {
+  const params = request.params ?? {}
+  const weights = {
+    ...DEFAULT_PARAMS.weights,
+    ...(params.weights ?? {})
   }
 
-  // 1. 一次ランキング
+  const fullParams: AlgorithmParams = {
+    ...DEFAULT_PARAMS,
+    ...params,
+    weights
+  }
+
+  const maxCandidates = Math.max(1, fullParams.rerankMaxCandidates)
+  const diversityCapN = Math.max(1, Math.min(fullParams.diversityCapN, maxCandidates))
+
   const primaryRanked = primaryRank(
-    candidates,
-    recentClusterExposures,
-    nowTs,
+    request.candidates,
+    request.userState.recentClusterExposures,
+    request.context.nowTs,
     fullParams.weights
   )
 
-  // 2. 多様性制約付き再ランキング
+  const rerankInput = primaryRanked.slice(0, maxCandidates)
   const { reranked, report } = diversityRerank(
-    primaryRanked,
-    recentClusterExposures,
+    rerankInput,
+    request.userState.recentClusterExposures,
     {
-      diversityCapN: fullParams.diversityCapN,
+      diversityCapN,
       diversityCapK: fullParams.diversityCapK,
       explorationBudget: fullParams.explorationBudget
     }
   )
 
-  // 3. 出力形式に変換
   const ranked: RankedItem[] = reranked.map(item => ({
     itemKey: item.itemKey,
     finalScore: item.score.finalScore,
@@ -278,6 +269,9 @@ export function rank(
   }))
 
   return {
+    requestId: request.requestId,
+    algorithmId: ALGORITHM_ID,
+    algorithmVersion: ALGORITHM_VERSION,
     ranked,
     constraintsReport: report
   }

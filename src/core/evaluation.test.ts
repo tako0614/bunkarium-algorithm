@@ -79,6 +79,16 @@ describe('evaluation', () => {
       const threshold = calculateLongTailThreshold(popularity, 0.2)
       expect(threshold).toBe(1000) // 上位1つがヘッド
     })
+    test('percentileが1を超える場合はクランプされる', () => {
+      const popularity: ItemPopularity[] = [
+        { itemId: 'a', clusterId: 'c1', totalExposures: 1000, totalLikes: 100, totalSaves: 50, createdAt: 0 },
+        { itemId: 'b', clusterId: 'c1', totalExposures: 500, totalLikes: 50, totalSaves: 25, createdAt: 0 },
+        { itemId: 'c', clusterId: 'c1', totalExposures: 100, totalLikes: 10, totalSaves: 5, createdAt: 0 }
+      ]
+
+      const threshold = calculateLongTailThreshold(popularity, 2.0)
+      expect(threshold).toBe(100)
+    })
   })
 
   describe('calculateClusterCoverage', () => {

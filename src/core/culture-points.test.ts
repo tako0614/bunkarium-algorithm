@@ -18,12 +18,19 @@ import {
 
 describe('culture-points', () => {
   describe('calculateDiminishingMultiplier', () => {
-    test('最初のイベントは乗数1.0', () => {
+    test('first event has multiplier 1.0', () => {
       const multiplier = calculateDiminishingMultiplier(1)
       expect(multiplier).toBe(1.0)
     })
 
-    test('イベント数が増えると乗数が減少する', () => {
+    test('non-positive counts are treated as 1', () => {
+      const zero = calculateDiminishingMultiplier(0)
+      const negative = calculateDiminishingMultiplier(-3)
+      expect(zero).toBe(1.0)
+      expect(negative).toBe(1.0)
+    })
+
+    test('multiplier decreases as events increase', () => {
       const m1 = calculateDiminishingMultiplier(1)
       const m5 = calculateDiminishingMultiplier(5)
       const m10 = calculateDiminishingMultiplier(10)
@@ -32,37 +39,38 @@ describe('culture-points', () => {
       expect(m5).toBeGreaterThan(m10)
     })
 
-    test('最小乗数以下にはならない', () => {
+    test('multiplier is not below minimum', () => {
       const multiplier = calculateDiminishingMultiplier(1000)
       expect(multiplier).toBeGreaterThanOrEqual(DEFAULT_CP_CONFIG.diminishing.minMultiplier)
     })
   })
 
   describe('calculateCPIssuance', () => {
-    test('注釈採用で基本ポイントが発行される', () => {
+    test('uses base amount for first mint', () => {
       const result = calculateCPIssuance('mint_note_adopted', 1)
       expect(result.amount).toBe(DEFAULT_CP_CONFIG.baseAmounts.noteAdopted)
     })
 
-    test('連続発行で逓減が適用される', () => {
+    test('diminishing reduces issuance over time', () => {
       const first = calculateCPIssuance('mint_note_adopted', 1)
       const tenth = calculateCPIssuance('mint_note_adopted', 10)
 
       expect(first.amount).toBeGreaterThan(tenth.amount)
     })
 
-    test('CRが高いと発行量が増える', () => {
+    test('CR multiplier is capped', () => {
       const normal = calculateCPIssuance('mint_note_adopted', 1, 1.0)
       const highCR = calculateCPIssuance('mint_note_adopted', 1, 2.0)
 
-      expect(highCR.amount).toBeGreaterThan(normal.amount)
+      expect(highCR.crMultiplier).toBeLessThanOrEqual(1.1)
+      expect(highCR.amount).toBeGreaterThanOrEqual(normal.amount)
     })
   })
 
   describe('calculateCPBalance', () => {
     const now = Date.now()
 
-    test('発行のみの場合は全て利用可能', () => {
+    test('sum of mint events increases balance', () => {
       const entries: CPLedgerEntry[] = [
         { id: '1', userId: 'u1', eventType: 'mint_note_adopted', amount: 10, timestamp: now },
         { id: '2', userId: 'u1', eventType: 'mint_bridge_success', amount: 20, timestamp: now }
@@ -73,7 +81,7 @@ describe('culture-points', () => {
       expect(balance.totalEarned).toBe(30)
     })
 
-    test('消費後は残高が減る', () => {
+    test('burn events reduce available balance', () => {
       const entries: CPLedgerEntry[] = [
         { id: '1', userId: 'u1', eventType: 'mint_note_adopted', amount: 100, timestamp: now },
         { id: '2', userId: 'u1', eventType: 'burn_editorial_application', amount: -30, timestamp: now }
@@ -84,7 +92,7 @@ describe('culture-points', () => {
       expect(balance.totalSpent).toBe(30)
     })
 
-    test('ロック中CPは利用不可', () => {
+    test('locked CP is not available', () => {
       const entries: CPLedgerEntry[] = [
         { id: '1', userId: 'u1', eventType: 'mint_note_adopted', amount: 100, timestamp: now },
         { id: '2', userId: 'u1', eventType: 'lock_stake_recommendation', amount: -50, timestamp: now }
@@ -99,7 +107,7 @@ describe('culture-points', () => {
   describe('countRecentEvents', () => {
     const now = Date.now()
 
-    test('時間窓内のイベントをカウントする', () => {
+    test('counts events within the window', () => {
       const entries: CPLedgerEntry[] = [
         { id: '1', userId: 'u1', eventType: 'mint_note_adopted', amount: 10, timestamp: now - 1000 },
         { id: '2', userId: 'u1', eventType: 'mint_note_adopted', amount: 10, timestamp: now - 2000 },
@@ -110,10 +118,10 @@ describe('culture-points', () => {
       expect(count).toBe(2)
     })
 
-    test('時間窓外のイベントは除外される', () => {
+    test('ignores events outside the window', () => {
       const entries: CPLedgerEntry[] = [
         { id: '1', userId: 'u1', eventType: 'mint_note_adopted', amount: 10, timestamp: now - 1000 },
-        { id: '2', userId: 'u1', eventType: 'mint_note_adopted', amount: 10, timestamp: now - 100000000 } // 古い
+        { id: '2', userId: 'u1', eventType: 'mint_note_adopted', amount: 10, timestamp: now - 100000000 }
       ]
 
       const count = countRecentEvents(entries, 'u1', 'note_adopted', 24)
@@ -122,7 +130,7 @@ describe('culture-points', () => {
   })
 
   describe('createMintEntry', () => {
-    test('台帳エントリを作成できる', () => {
+    test('creates a new mint entry', () => {
       const entry = createMintEntry(
         'u1',
         'mint_note_adopted',
@@ -140,7 +148,7 @@ describe('culture-points', () => {
   })
 
   describe('createStakeRecommendation', () => {
-    test('残高が十分なら推薦を作成できる', () => {
+    test('creates stake when balance is sufficient', () => {
       const balance: CPBalanceSummary = {
         userId: 'u1',
         available: 100,
@@ -163,7 +171,7 @@ describe('culture-points', () => {
       expect(result.lockEntry.amount).toBe(-50)
     })
 
-    test('残高不足ならエラー', () => {
+    test('returns error when balance is insufficient', () => {
       const balance: CPBalanceSummary = {
         userId: 'u1',
         available: 30,
@@ -179,7 +187,7 @@ describe('culture-points', () => {
       expect('error' in result).toBe(true)
     })
 
-    test('最小ステーク量未満ならエラー', () => {
+    test('returns error when below minimum stake', () => {
       const balance: CPBalanceSummary = {
         userId: 'u1',
         available: 100,
@@ -209,7 +217,7 @@ describe('culture-points', () => {
       status: 'active'
     }
 
-    test('指標が改善したら成功', () => {
+    test('successful outcome passes threshold', () => {
       const outcome = evaluateStakeOutcome(stake, {
         supportDensityBefore: 0.1,
         supportDensityAfter: 0.2,
@@ -225,7 +233,7 @@ describe('culture-points', () => {
       expect(outcome.totalScore).toBeGreaterThan(0.5)
     })
 
-    test('指標が改善しなければ失敗', () => {
+    test('no improvement fails', () => {
       const outcome = evaluateStakeOutcome(stake, {
         supportDensityBefore: 0.1,
         supportDensityAfter: 0.1,
@@ -254,7 +262,7 @@ describe('culture-points', () => {
       status: 'active'
     }
 
-    test('成功時はボーナス付きでアンロック', () => {
+    test('success returns bonus and unlock entries', () => {
       const outcome = {
         supportDensityImprovement: 1,
         breadthIncrease: 3,
@@ -271,7 +279,7 @@ describe('culture-points', () => {
       expect(entries.some(e => e.eventType === 'unlock_stake_success')).toBe(true)
     })
 
-    test('失敗時は一部没収', () => {
+    test('failure includes slash entry', () => {
       const outcome = {
         supportDensityImprovement: 0,
         breadthIncrease: 0,
@@ -291,13 +299,13 @@ describe('culture-points', () => {
   describe('detectCPFraud', () => {
     const now = Date.now()
 
-    test('正常なパターンは不正検出されない', () => {
+    test('normal patterns are not flagged', () => {
       const entries: CPLedgerEntry[] = Array(5).fill(null).map((_, i) => ({
         id: `${i}`,
         userId: 'u1',
         eventType: 'mint_note_adopted' as const,
         amount: 10,
-        timestamp: now - i * 3600000, // 1時間ごと
+        timestamp: now - i * 3600000,
         diminishingApplied: false
       }))
 
@@ -306,13 +314,13 @@ describe('culture-points', () => {
       expect(result.recommendedAction).toBe('none')
     })
 
-    test('異常な頻度は検出される', () => {
+    test('high frequency patterns are flagged', () => {
       const entries: CPLedgerEntry[] = Array(500).fill(null).map((_, i) => ({
         id: `${i}`,
         userId: 'u1',
         eventType: 'mint_note_adopted' as const,
         amount: 1,
-        timestamp: now - i * 1000, // 1秒ごと
+        timestamp: now - i * 1000,
         diminishingApplied: true
       }))
 
@@ -323,7 +331,7 @@ describe('culture-points', () => {
   })
 
   describe('generateCPSummary', () => {
-    test('サマリーを生成できる', () => {
+    test('summary contains balances and events', () => {
       const now = Date.now()
       const entries: CPLedgerEntry[] = [
         { id: '1', userId: 'u1', eventType: 'mint_note_adopted', amount: 10, timestamp: now },
@@ -333,9 +341,9 @@ describe('culture-points', () => {
 
       const summary = generateCPSummary(entries, 'u1')
 
-      expect(summary).toContain('Culture Points')
+      expect(summary).toContain('Culture Points Summary')
       expect(summary).toContain('u1')
-      expect(summary).toContain('利用可能')
+      expect(summary).toContain('[Balances]')
     })
   })
 })

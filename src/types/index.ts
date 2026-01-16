@@ -1,4 +1,4 @@
-// ============================================================
+﻿// ============================================================
 // Algorithm Contract Types
 // ============================================================
 
@@ -8,16 +8,27 @@ export interface AlgorithmParams {
   likeDecayWindowMs: number
   /** いいね逓減係数α デフォルト: 0.05 */
   likeDecayAlpha: number
+  /** 連打判定閾値（30秒内の回数） デフォルト: 50 */
+  rapidPenaltyThreshold: number
+  /** 連打ペナルティ乗数 デフォルト: 0.1 */
+  rapidPenaltyMultiplier: number
+  /** 支持率/支持密度の事前分母 デフォルト: 10 */
+  supportRatePriorViews: number
+  /** 支持率/支持密度の事前分子 デフォルト: 1 */
+  supportRatePriorLikes: number
+  /** 持続の半減期（日） デフォルト: 14 */
+  persistenceHalfLifeDays: number
   /** 多様性制約: 直近N件 デフォルト: 20 */
   diversityCapN: number
   /** 多様性制約: 同一クラスタ上限K デフォルト: 5 */
   diversityCapK: number
-  /** 探索枠（0.0〜1.0） デフォルト: 0.15 */
+  /** 探索枠（0.0?1.0） デフォルト: 0.15 */
   explorationBudget: number
+  /** 再ランキング対象の最大件数 デフォルト: 200 */
+  rerankMaxCandidates: number
   /** スコア重み */
   weights: ScoreWeights
 }
-
 export interface ScoreWeights {
   /** Personal Relevance Score weight */
   prs: number
@@ -31,12 +42,17 @@ export interface ScoreWeights {
 export const DEFAULT_PARAMS: AlgorithmParams = {
   likeDecayWindowMs: 24 * 60 * 60 * 1000, // 24h
   likeDecayAlpha: 0.05,
+  rapidPenaltyThreshold: 50,
+  rapidPenaltyMultiplier: 0.1,
+  supportRatePriorViews: 10,
+  supportRatePriorLikes: 1,
+  persistenceHalfLifeDays: 14,
   diversityCapN: 20,
   diversityCapK: 5,
   explorationBudget: 0.15,
+  rerankMaxCandidates: 200,
   weights: { prs: 0.55, cvs: 0.25, dns: 0.20 }
 }
-
 // ============================================================
 // User Types
 // ============================================================
@@ -47,14 +63,17 @@ export interface UserStateSnapshot {
   userKey: string
   /** 24時間内のいいね回数 */
   likeWindowCount24h: number
+  /** 30秒内のいいね回数 */
+  recentLikeCount30s: number
   /** 直近のクラスタ露出カウント */
   recentClusterExposures: Record<string, number>
-  /** ユーザーの多様性スライダー値（0.0〜1.0） */
+  /** ユーザーの多様性スライダー値（0.0?1.0） */
   diversitySlider: number
   /** ユーザーのCR（Curator Reputation） */
   curatorReputation: number
+  /** 直近90日のCP発行量 */
+  cpEarned90d: number
 }
-
 // ============================================================
 // Content Types
 // ============================================================
@@ -79,8 +98,8 @@ export interface Candidate {
 export interface CandidateFeatures {
   /** CVSコンポーネント */
   cvsComponents: CVSComponents
-  /** ユニーク閲覧数 */
-  uniqueViews: number
+  /** 不正排除済みユニーク閲覧数 */
+  qualifiedUniqueViews: number
   /** 品質フラグ */
   qualityFlags: QualityFlags
   /** 埋め込みベクトル（任意） */
@@ -109,8 +128,6 @@ export interface CVSComponents {
 export interface QualityFlags {
   /** モデレーション済み */
   moderated: boolean
-  /** NSFW */
-  nsfw: boolean
   /** スパム疑い */
   spamSuspect: boolean
 }
@@ -125,7 +142,13 @@ export interface PublicMetrics {
   supportDensity: number
   /** 支持率 */
   supportRate: number
-  /** 広がり（到達クラスタ数） */
+  /** 文化視聴値 */
+  culturalViewValue: number
+  /** 重み付き視聴合計 */
+  weightedViews: number
+  /** 不正排除済みユニーク閲覧数 */
+  qualifiedUniqueViews: number
+  /** 広がり（実効クラスタ数） */
   breadth: number
   /** 広がりレベル（low/medium/high） */
   breadthLevel: 'low' | 'medium' | 'high'
@@ -133,22 +156,24 @@ export interface PublicMetrics {
   persistenceDays: number
   /** 持続レベル */
   persistenceLevel: 'low' | 'medium' | 'high'
+  /** 上位クラスタ偏り */
+  topClusterShare: number
 }
-
 /** メトリクス計算用の入力データ */
 export interface MetricsInput {
   /** 重み付きいいね合計 */
   weightedLikeSum: number
-  /** ユニーク閲覧数 */
-  uniqueViews: number
-  /** 支持者のクラスタ分布 */
-  supporterClusters: string[]
+  /** 重み付き視聴合計 */
+  weightedViews: number
+  /** 不正排除済みユニーク閲覧数 */
+  qualifiedUniqueViews: number
+  /** 支持者のクラスタ分布（重み） */
+  clusterWeights: Record<string, number>
   /** 最初の反応からの日数 */
   daysSinceFirstReaction: number
   /** 直近7日の反応残存率 */
   recentReactionRate: number
 }
-
 // ============================================================
 // Ranking Types
 // ============================================================
@@ -159,6 +184,8 @@ export interface RankRequest {
   contractVersion: string
   /** リクエストID */
   requestId: string
+  /** 決定性用シード（任意） */
+  requestSeed?: string
   /** ユーザー状態 */
   userState: UserStateSnapshot
   /** 候補一覧 */
@@ -258,3 +285,6 @@ export interface LikeWeight {
   /** 支持力メーター表示用（0〜100%） */
   supportPowerPercent: number
 }
+
+
+

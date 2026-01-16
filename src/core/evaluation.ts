@@ -161,7 +161,8 @@ export function calculateLongTailThreshold(
   const sorted = [...popularity].sort((a, b) => b.totalExposures - a.totalExposures)
 
   // 上位N%のインデックス
-  const headCount = Math.max(1, Math.floor(sorted.length * topPercentile))
+  const safePercentile = Math.min(1, Math.max(0, topPercentile))
+  const headCount = Math.max(1, Math.floor(sorted.length * safePercentile))
 
   // ヘッドとテールの境界値
   return sorted[headCount - 1].totalExposures

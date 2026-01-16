@@ -74,6 +74,10 @@ describe('reputation', () => {
       const multiplier = getCRMultiplier(1.0)
       expect(multiplier).toBeCloseTo(1.0)
     })
+    test('CRが0以下でも有限値になる', () => {
+      expect(getCRMultiplier(0)).toBeFinite()
+      expect(getCRMultiplier(-1)).toBeFinite()
+    })
 
     test('CRが高いと乗数も高い', () => {
       const lowCR = getCRMultiplier(0.5)
