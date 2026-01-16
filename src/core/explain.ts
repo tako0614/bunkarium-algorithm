@@ -1,18 +1,10 @@
 import type { Candidate, ReasonCode } from '../types'
+import { REASON_DESCRIPTIONS } from '../types'
+import { calculateSupportDensity } from './metrics'
 import { EXPLAIN_THRESHOLDS } from './defaults'
 
 /**
- * 理由コード生成（Explain）
- *
- * "Why this?"（露出理由）をログ化し、UIに表示する
- */
-
-/**
- * 理由コードを決定
- *
- * @param candidate - 候補アイテム
- * @param clusterCounts - クラスタ露出カウント
- * @returns 理由コード一覧
+ * Build reason codes for explain.
  */
 export function determineReasonCodes(
   candidate: Candidate,
@@ -22,7 +14,6 @@ export function determineReasonCodes(
   const { features } = candidate
   const thresholds = EXPLAIN_THRESHOLDS
 
-  // CVSコンポーネントに基づく理由
   if (features.cvsComponents.contextSignal >= thresholds.contextSignalThreshold) {
     codes.push('GROWING_CONTEXT')
   }
@@ -31,11 +22,13 @@ export function determineReasonCodes(
     codes.push('BRIDGE_SUCCESS')
   }
 
-  // 支持密度が高い
   const derivedSupportDensity =
     features.publicMetrics?.supportDensity ??
-    (features.uniqueViews > 0
-      ? features.cvsComponents.likeSignal / features.uniqueViews
+    (features.qualifiedUniqueViews > 0
+      ? calculateSupportDensity(
+        features.cvsComponents.likeSignal,
+        features.qualifiedUniqueViews
+      )
       : undefined)
   if (derivedSupportDensity !== undefined) {
     if (derivedSupportDensity >= thresholds.supportDensityThreshold) {
@@ -45,13 +38,11 @@ export function determineReasonCodes(
     codes.push('HIGH_SUPPORT_DENSITY')
   }
 
-  // クラスタの新規性
   const clusterExposure = clusterCounts[candidate.clusterId] || 0
   if (clusterExposure < thresholds.newClusterExposureThreshold) {
     codes.push('NEW_IN_CLUSTER')
   }
 
-  // PRSが高い場合（個人適合）
   if (features.prs && features.prs >= thresholds.prsSimilarityThreshold) {
     switch (features.prsSource) {
       case 'liked':
@@ -67,7 +58,6 @@ export function determineReasonCodes(
     }
   }
 
-  // 最低1つは理由を付ける
   if (codes.length === 0) {
     codes.push('TRENDING_IN_CLUSTER')
   }
@@ -76,36 +66,14 @@ export function determineReasonCodes(
 }
 
 /**
- * 理由コードを人間が読める文言に変換
- *
- * @param codes - 理由コード一覧
- * @returns 表示用テキスト一覧
+ * Convert reason codes to labels.
  */
 export function formatReasonCodes(codes: ReasonCode[]): string[] {
-  const descriptions: Record<ReasonCode, string> = {
-    SIMILAR_TO_SAVED: 'あなたの保存した作品に近い',
-    SIMILAR_TO_LIKED: 'あなたが支持した作品に近い',
-    FOLLOWING: 'フォロー中のユーザーから',
-    GROWING_CONTEXT: '注釈が増えている',
-    BRIDGE_SUCCESS: '翻訳ブリッジで到達',
-    DIVERSITY_SLOT: '多様性枠',
-    EXPLORATION: '新しいシーンから',
-    HIGH_SUPPORT_DENSITY: '支持密度が高い',
-    TRENDING_IN_CLUSTER: 'シーン内で注目',
-    NEW_IN_CLUSTER: 'シーンの新着',
-    EDITORIAL: '編集枠'
-  }
-
-  return codes.map(code => descriptions[code])
+  return codes.map(code => REASON_DESCRIPTIONS[code])
 }
 
 /**
- * 詳細な説明を生成（デバッグ/透明性用）
- *
- * @param candidate - 候補アイテム
- * @param scoreBreakdown - スコア内訳
- * @param reasonCodes - 理由コード
- * @returns 詳細説明
+ * Generate a detailed explanation for debug/UX.
  */
 export function generateDetailedExplanation(
   candidate: Candidate,
@@ -120,17 +88,17 @@ export function generateDetailedExplanation(
     {
       name: 'PRS',
       value: scoreBreakdown.prs,
-      description: '個人嗜好適合スコア'
+      description: 'Personal relevance'
     },
     {
       name: 'CVS',
       value: scoreBreakdown.cvs,
-      description: '文化価値スコア'
+      description: 'Cultural value'
     },
     {
       name: 'DNS',
       value: scoreBreakdown.dns,
-      description: '多様性・新規性スコア'
+      description: 'Diversity/novelty'
     }
   ]
 
@@ -138,18 +106,17 @@ export function generateDetailedExplanation(
     factors.push({
       name: 'Penalty',
       value: -scoreBreakdown.penalty,
-      description: 'ペナルティ（類似度/品質）'
+      description: 'Quality penalties'
     })
   }
 
   const humanReadable = formatReasonCodes(reasonCodes)
 
-  // 最も寄与が大きい要因を特定
   const maxFactor = factors.reduce((max, f) =>
     Math.abs(f.value) > Math.abs(max.value) ? f : max
   )
 
-  const summary = `${maxFactor.description}が主な要因です`
+  const summary = `${maxFactor.description} is the main factor.`
 
   return {
     summary,
@@ -159,10 +126,7 @@ export function generateDetailedExplanation(
 }
 
 /**
- * スコア寄与率を計算
- *
- * @param breakdown - スコア内訳
- * @returns 各要素の寄与率（%）
+ * Contribution rates for score factors.
  */
 export function calculateContributionRates(
   breakdown: { prs: number; cvs: number; dns: number; penalty: number }

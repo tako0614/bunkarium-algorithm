@@ -15,10 +15,9 @@ const baseCandidate: Candidate = {
       bridgeSignal: 0,
       sustainSignal: 0
     },
-    uniqueViews: 1,
+    qualifiedUniqueViews: 1,
     qualityFlags: {
       moderated: true,
-      nsfw: false,
       spamSuspect: false
     }
   }
