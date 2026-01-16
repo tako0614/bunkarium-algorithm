@@ -72,7 +72,7 @@ export function calculateDNS(
   score += clusterNovelty * 0.6
 
   // 時間的新規性（新しいコンテンツほど高い）
-  const ageHours = (nowTs - candidate.createdAt) / (1000 * 60 * 60)
+  const ageHours = Math.max(0, (nowTs - candidate.createdAt) / (1000 * 60 * 60))
   const timeNovelty = Math.exp(-ageHours / SCORING_DEFAULTS.timeDecayHalfLifeHours)
   score += timeNovelty * 0.4
 

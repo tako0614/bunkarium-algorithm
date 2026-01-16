@@ -124,6 +124,20 @@ describe('embedding', () => {
       expect(index.hashTables.length).toBe(5)
     })
 
+    test('超平面の値は有限値に収まる', () => {
+      const index = createLSHIndex({
+        numTables: 2,
+        numHashPerTable: 3,
+        dimension: 4,
+        seed: 1
+      })
+
+      const values = index.hyperplanes.flatMap(table =>
+        table.flatMap(plane => plane)
+      )
+      expect(values.every(Number.isFinite)).toBe(true)
+    })
+
     test('アイテムを追加して検索できる', () => {
       const index = createLSHIndex({
         numTables: 10,
@@ -177,6 +191,17 @@ describe('embedding', () => {
       const result = kmeans(data, 2)
       expect(result.centroids.length).toBe(2)
       expect(result.assignments.length).toBe(6)
+    })
+
+    test('kがデータ数を超える場合はデータ数にクランプする', () => {
+      const data = [
+        [0, 0],
+        [1, 1]
+      ]
+
+      const result = kmeans(data, 5)
+      expect(result.centroids.length).toBe(2)
+      expect(result.assignments.every(a => a >= 0 && a < 2)).toBe(true)
     })
 
     test('全データが割り当てられる', () => {

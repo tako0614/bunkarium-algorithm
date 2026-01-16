@@ -1,4 +1,4 @@
-import type { LikeWeight, AlgorithmParams, DEFAULT_PARAMS } from '../types'
+import type { LikeWeight } from '../types'
 
 /**
  * いいね逓減重み計算 w(u)
