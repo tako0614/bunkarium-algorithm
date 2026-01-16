@@ -300,7 +300,7 @@ export function createLSHIndex(config: LSHConfig = DEFAULT_LSH_CONFIG): LSHIndex
       const plane: number[] = []
       for (let d = 0; d < config.dimension; d++) {
         // 正規分布からサンプリング (Box-Muller)
-        const u1 = random()
+        const u1 = Math.max(random(), 1e-12)
         const u2 = random()
         const normal = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2)
         plane.push(normal)
@@ -552,6 +552,7 @@ export function kmeans(
 
   const n = data.length
   const dim = data[0].length
+  const clusterCount = Math.min(k, n)
 
   // 初期中心をランダムに選択 (K-means++)
   const centroids: Embedding[] = []
@@ -563,7 +564,7 @@ export function kmeans(
   usedIndices.add(firstIdx)
 
   // 残りの中心を距離に比例した確率で選択
-  while (centroids.length < k) {
+  while (centroids.length < clusterCount) {
     const distances = data.map((point, idx) => {
       if (usedIndices.has(idx)) return 0
       let minDist = Infinity
@@ -597,7 +598,7 @@ export function kmeans(
     const newAssignments = data.map(point => {
       let bestCluster = 0
       let bestDist = Infinity
-      for (let c = 0; c < k; c++) {
+      for (let c = 0; c < clusterCount; c++) {
         const d = euclideanDistance(point, centroids[c])
         if (d < bestDist) {
           bestDist = d
@@ -620,7 +621,7 @@ export function kmeans(
     if (!changed) break
 
     // 中心更新
-    for (let c = 0; c < k; c++) {
+    for (let c = 0; c < clusterCount; c++) {
       const clusterPoints = data.filter((_, i) => assignments[i] === c)
       if (clusterPoints.length > 0) {
         centroids[c] = meanVector(clusterPoints)

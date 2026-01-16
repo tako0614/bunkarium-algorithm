@@ -119,7 +119,13 @@ export function diversityRerank(
   let explorationSlotsUsed = 0
 
   // 探索枠の数を計算
-  const explorationSlotCount = Math.floor(diversityCapN * explorationBudget)
+  const explorationSlotCount = Math.max(
+    0,
+    Math.min(diversityCapN, Math.floor(diversityCapN * explorationBudget))
+  )
+  const explorationInterval = explorationSlotCount > 0
+    ? Math.max(1, Math.floor(diversityCapN / (explorationSlotCount + 1)))
+    : 0
 
   // 探索候補を抽出（露出が少ないクラスタから）
   const explorationCandidates = remaining
@@ -130,8 +136,9 @@ export function diversityRerank(
     // 探索枠を強制挿入（一定間隔で）
     const shouldInsertExploration =
       explorationSlotsUsed < explorationSlotCount &&
+      explorationInterval > 0 &&
       result.length > 0 &&
-      result.length % Math.floor(diversityCapN / (explorationSlotCount + 1)) === 0
+      result.length % explorationInterval === 0
 
     if (shouldInsertExploration && explorationCandidates.length > explorationSlotsUsed) {
       const explorationItem = explorationCandidates[explorationSlotsUsed]

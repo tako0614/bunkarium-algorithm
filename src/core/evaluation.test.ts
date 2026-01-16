@@ -10,6 +10,7 @@ import {
   calculateUserDiversityScore,
   calculatePositionBias,
   calculateClusterFairness,
+  compareABTest,
   evaluate,
   type ExposureLog,
   type ItemPopularity
@@ -162,6 +163,28 @@ describe('evaluation', () => {
       expect(result.details.totalExposures).toBe(3)
       expect(result.details.uniqueItems).toBe(3)
       expect(result.details.uniqueClusters).toBe(3)
+    })
+  })
+
+  describe('compareABTest', () => {
+    test('controlが0でlower-is-better指標が悪化すると負の無限大になる', () => {
+      const controlExposures: ExposureLog[] = [
+        { userId: 'u1', itemId: 'a', clusterId: 'c1', position: 0, timestamp: 1 },
+        { userId: 'u2', itemId: 'b', clusterId: 'c1', position: 1, timestamp: 2 }
+      ]
+      const treatmentExposures: ExposureLog[] = [
+        { userId: 'u1', itemId: 'a', clusterId: 'c1', position: 0, timestamp: 1 },
+        { userId: 'u2', itemId: 'a', clusterId: 'c1', position: 1, timestamp: 2 },
+        { userId: 'u3', itemId: 'a', clusterId: 'c1', position: 2, timestamp: 3 },
+        { userId: 'u4', itemId: 'b', clusterId: 'c1', position: 3, timestamp: 4 }
+      ]
+      const popularity: ItemPopularity[] = [
+        { itemId: 'a', clusterId: 'c1', totalExposures: 10, totalLikes: 0, totalSaves: 0, createdAt: 0 },
+        { itemId: 'b', clusterId: 'c1', totalExposures: 10, totalLikes: 0, totalSaves: 0, createdAt: 0 }
+      ]
+
+      const { improvement } = compareABTest(controlExposures, treatmentExposures, popularity, 1)
+      expect(improvement.exposureGini).toBe(Number.NEGATIVE_INFINITY)
     })
   })
 })

@@ -607,7 +607,13 @@ export function compareABTest(
     const treatmentVal = treatment[key] as number
 
     if (controlVal === 0) {
-      improvement[key] = treatmentVal > 0 ? Infinity : 0
+      if (treatmentVal === 0) {
+        improvement[key] = 0
+      } else if (lowerIsBetter.includes(key)) {
+        improvement[key] = -Infinity
+      } else {
+        improvement[key] = Infinity
+      }
     } else if (lowerIsBetter.includes(key)) {
       improvement[key] = (controlVal - treatmentVal) / controlVal
     } else {
