@@ -1,33 +1,57 @@
-import { Hono } from 'hono'
-import { cors } from 'hono/cors'
+/**
+ * @bunkarium/algorithm
+ *
+ * 文化多様性を重視するレコメンデーションアルゴリズム
+ *
+ * 特徴:
+ * - いいね逓減（押せるが目減り）
+ * - 総数ではなく割合/密度/分布表示
+ * - PRS/CVS/DNS の多目的スコアリング
+ * - 多様性制約付き再ランキング
+ * - 説明可能な理由コード
+ */
 
-type Bindings = {
-  // DB: D1Database
-  // MODELS: R2Bucket
-}
+// Types
+export * from './types'
 
-const app = new Hono<{ Bindings: Bindings }>()
+// Core algorithms
+export {
+  // Like decay
+  calculateLikeWeight,
+  calculateLikeWeightWithRapidPenalty,
+  predictNextLikeWeight,
+  calculateWeightedLikeSignal,
 
-app.use('*', cors())
+  // Metrics
+  calculateSupportDensity,
+  calculateSupportRate,
+  calculateBreadth,
+  getBreadthLevel,
+  calculatePersistence,
+  getPersistenceLevel,
+  calculatePublicMetrics,
+  formatMetricsForDisplay,
 
-app.get('/', (c) => {
-  return c.json({ service: 'bunkarium-algorithm', status: 'ok' })
-})
+  // Scoring
+  calculateCVS,
+  calculateDNS,
+  calculatePenalty,
+  calculateMixedScore,
+  DEFAULT_CVS_WEIGHTS,
 
-app.get('/health', (c) => {
-  return c.json({ healthy: true })
-})
+  // Reranking
+  primaryRank,
+  diversityRerank,
+  rank,
 
-// Recommendation endpoint placeholder
-app.post('/recommend', async (c) => {
-  const body = await c.req.json<{ userId: string; limit?: number }>()
+  // Explain
+  determineReasonCodes,
+  formatReasonCodes,
+  generateDetailedExplanation,
+  calculateContributionRates
+} from './core'
 
-  // TODO: Implement cultural diversity recommendation algorithm
-  return c.json({
-    userId: body.userId,
-    recommendations: [],
-    algorithm: 'cultural-diversity-v1'
-  })
-})
-
-export default app
+// Version info
+export const ALGORITHM_ID = 'bunkarium-culture-rank'
+export const ALGORITHM_VERSION = '1.0.0'
+export const CONTRACT_VERSION = '1.0'
