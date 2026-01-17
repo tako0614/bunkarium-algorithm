@@ -224,7 +224,7 @@ bun run typecheck
 bun run build
 ```
 
-All tests: **449 pass, 0 fail** (includes conformance, precision, and comprehensive coverage)
+All tests: **460 pass, 0 fail** (includes conformance, precision, and comprehensive coverage)
 
 ---
 
@@ -380,5 +380,5 @@ See main repository for license information.
 ### v1.0.0 (2026-01-18)
 - Initial release
 - Contract v1.0 implementation
-- Full test coverage (264 tests)
+- Full test coverage (460 tests)
 - Complete documentation
