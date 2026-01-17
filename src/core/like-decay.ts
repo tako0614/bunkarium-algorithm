@@ -1,4 +1,4 @@
-import type { LikeWeight, LikeWeightInput } from '../types'
+import type { LikeWeightOutput, LikeWeightInput } from '../types'
 import { DEFAULT_PARAMS } from '../types'
 import { getCRMultiplier } from './reputation'
 
@@ -6,15 +6,18 @@ import { getCRMultiplier } from './reputation'
  * Like decay weight.
  * w(n) = 1 / (1 + alpha * (n - 1))
  */
-export function calculateLikeWeight(input: LikeWeightInput): LikeWeight {
+export function calculateLikeWeight(
+  input: LikeWeightInput,
+  opts?: { alpha?: number; rapidPenaltyThreshold?: number; rapidPenaltyMultiplier?: number }
+): LikeWeightOutput {
   const n = Math.max(1, input.likeWindowCount)
-  const alpha = input.alpha ?? DEFAULT_PARAMS.likeDecayAlpha
+  const alpha = opts?.alpha ?? input.alpha ?? DEFAULT_PARAMS.likeDecayAlpha
   const baseWeight = 1 / (1 + alpha * (n - 1))
 
   const recentLikeCount30s = input.recentLikeCount30s ?? 0
-  const rapidThreshold = input.rapidPenaltyThreshold ?? DEFAULT_PARAMS.rapidPenaltyThreshold
+  const rapidThreshold = opts?.rapidPenaltyThreshold ?? input.rapidPenaltyThreshold ?? DEFAULT_PARAMS.rapidPenaltyThreshold
   const rapidPenaltyMultiplier =
-    input.rapidPenaltyMultiplier ?? DEFAULT_PARAMS.rapidPenaltyMultiplier
+    opts?.rapidPenaltyMultiplier ?? input.rapidPenaltyMultiplier ?? DEFAULT_PARAMS.rapidPenaltyMultiplier
 
   const isRapid = recentLikeCount30s >= rapidThreshold
   const rapidPenaltyApplied = isRapid && rapidPenaltyMultiplier < 1
@@ -35,7 +38,7 @@ export function calculateLikeWeight(input: LikeWeightInput): LikeWeight {
 export function predictNextLikeWeight(
   currentLikeCount: number,
   alpha: number = DEFAULT_PARAMS.likeDecayAlpha
-): LikeWeight {
+): LikeWeightOutput {
   return calculateLikeWeight({
     likeWindowCount: currentLikeCount + 1,
     alpha

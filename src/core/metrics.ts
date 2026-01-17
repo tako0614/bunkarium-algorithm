@@ -1,14 +1,46 @@
-﻿import type { PublicMetrics, MetricsInput } from '../types'
+﻿import type { PublicMetrics, PublicMetricsInput } from '../types'
 
 import type { PublicMetricsParams } from '../types'
 import { DEFAULT_PUBLIC_METRICS_PARAMS } from '../types'
 
 const LN2 = Math.log(2)
 
+/**
+ * 数値を6桁精度に丸める（公開メトリクス出力用）
+ */
+function round6(value: number): number {
+  return Math.round(value * 1e6) / 1e6
+}
+
+/**
+ * クラスタ重みを上位50に集約（パフォーマンス対策）
+ * algorithm.md仕様: クラスタ数が50を超える場合、上位49を保持し残りは"__other__"に集約
+ */
+function aggregateClusters(clusterWeights: Record<string, number>): Record<string, number> {
+  const entries = Object.entries(clusterWeights)
+    .map(([cluster, weight]) => ({ cluster, weight: Math.max(0, weight) }))
+    .filter(entry => entry.weight > 0)
+    .sort((a, b) => b.weight - a.weight)
+
+  if (entries.length <= 50) {
+    return Object.fromEntries(entries.map(e => [e.cluster, e.weight]))
+  }
+
+  // 上位49 + "__other__"
+  const top49 = entries.slice(0, 49)
+  const otherWeight = entries.slice(49).reduce((sum, e) => sum + e.weight, 0)
+
+  const aggregated: Record<string, number> = Object.fromEntries(top49.map(e => [e.cluster, e.weight]))
+  if (otherWeight > 0) {
+    aggregated['__other__'] = otherWeight
+  }
+
+  return aggregated
+}
+
 function getClusterDistribution(clusterWeights: Record<string, number>): number[] {
-  const weights = Object.values(clusterWeights)
-    .map(weight => Math.max(0, weight))
-    .filter(weight => weight > 0)
+  const aggregated = aggregateClusters(clusterWeights)
+  const weights = Object.values(aggregated)
 
   const total = weights.reduce((sum, weight) => sum + weight, 0)
   if (total <= 0) return []
@@ -25,48 +57,94 @@ function getClusterDistribution(clusterWeights: Record<string, number>): number[
 /**
  * 支持密度（Support Density）を計算
  *
- * SD(c) = (Σ(w(u) * CR(u)) + priorLikes) / (QUV + priorViews)^β
+ * SD(c) = (weightedLikeSum + priorLikes) / (qualifiedUniqueViewers + priorViews)^β
  *
  * @param weightedLikeSum - 重み付きいいね合計
- * @param qualifiedUniqueViews - 不正排除済みユニーク閲覧数
- * @param beta - 指数（デフォルト: 1.0、ロングテール救済は0.7-1.0）
+ * @param qualifiedUniqueViewers - 不正排除済みユニーク閲覧者数（distinct viewers）
+ * @param beta - 指数（デフォルト: 1.0）
  * @param priorViews - 事前分母
  * @param priorLikes - 事前分子
  * @returns 支持密度
  */
 export function calculateSupportDensity(
   weightedLikeSum: number,
-  qualifiedUniqueViews: number,
+  qualifiedUniqueViewers: number,
   beta: number = 1.0,
   priorViews: number = 10,
   priorLikes: number = 1
 ): number {
-  const denominator = Math.pow(qualifiedUniqueViews + priorViews, beta)
+  const denominator = Math.pow(qualifiedUniqueViewers + priorViews, beta)
   if (denominator <= 0) return 0
   return (weightedLikeSum + priorLikes) / denominator
 }
 
 /**
  * 支持率（Support Rate）を計算
+ * algorithm.md仕様: uniqueLikersを分子に使用（weightedLikeSumとは分離）
  *
- * SR(c) = (Σ(w(u) * CR(u)) + priorLikes) / (UV(c) + priorViews)
+ * SR(c) = clamp(0, 1, (uniqueLikers + priorUniqueLikers) / (qualifiedUniqueViewers + priorViews))
  *
- * @param weightedLikeSum - 重み付きいいね合計
- * @param qualifiedUniqueViews - 不正排除済みユニーク閲覧数
+ * @param uniqueLikers - ユニークいいね者数（distinct likers）
+ * @param qualifiedUniqueViewers - 不正排除済みユニーク閲覧者数（distinct viewers）
  * @param priorViews - 事前分母
- * @param priorLikes - 事前分子
- * @returns 支持率
+ * @param priorUniqueLikers - uniqueLikers平滑化事前値
+ * @returns 支持率（0～1）
  */
 export function calculateSupportRate(
+  uniqueLikers: number,
+  qualifiedUniqueViewers: number,
+  priorViews: number = 10,
+  priorUniqueLikers: number = 1
+): number {
+  const V = qualifiedUniqueViewers + priorViews
+  if (V <= 0) return 0
+  const Lu = uniqueLikers + priorUniqueLikers
+  const rate = Lu / V
+  return Math.max(0, Math.min(1, rate))
+}
+
+/**
+ * 重み付き支持指数（Weighted Support Index）を計算
+ * algorithm.md仕様: weightedLikeSum/QUV（1を超える可能性あり）
+ *
+ * WSI(c) = (weightedLikeSum + priorLikes) / (qualifiedUniqueViewers + priorViews)
+ *
+ * @param weightedLikeSum - 重み付きいいね合計
+ * @param qualifiedUniqueViewers - 不正排除済みユニーク閲覧者数
+ * @param priorViews - 事前分母
+ * @param priorLikes - 事前分子
+ * @returns 重み付き支持指数（1を超える可能性あり）
+ */
+export function calculateWeightedSupportIndex(
   weightedLikeSum: number,
-  qualifiedUniqueViews: number,
+  qualifiedUniqueViewers: number,
   priorViews: number = 10,
   priorLikes: number = 1
 ): number {
-  const denominator = qualifiedUniqueViews + priorViews
-  if (denominator <= 0) return 0
-  const rate = (weightedLikeSum + priorLikes) / denominator
-  return Math.min(1, rate)
+  const V = qualifiedUniqueViewers + priorViews
+  if (V <= 0) return 0
+  const Lw = weightedLikeSum + priorLikes
+  return Lw / V
+}
+
+/**
+ * 重み付き支持率（Weighted Support Rate Clamped）を計算
+ * algorithm.md仕様: weightedSupportIndexを0～1にクランプ
+ *
+ * @param weightedLikeSum - 重み付きいいね合計
+ * @param qualifiedUniqueViewers - 不正排除済みユニーク閲覧者数
+ * @param priorViews - 事前分母
+ * @param priorLikes - 事前分子
+ * @returns 重み付き支持率（0～1）
+ */
+export function calculateWeightedSupportRateClamped(
+  weightedLikeSum: number,
+  qualifiedUniqueViewers: number,
+  priorViews: number = 10,
+  priorLikes: number = 1
+): number {
+  const wsi = calculateWeightedSupportIndex(weightedLikeSum, qualifiedUniqueViewers, priorViews, priorLikes)
+  return Math.max(0, Math.min(1, wsi))
 }
 
 /**
@@ -131,11 +209,12 @@ export function calculatePersistence(
   recentReactionRate: number,
   halfLifeDays: number = 14
 ): number {
-  if (recentReactionRate <= 0 || halfLifeDays <= 0) return 0
+  const r = Math.max(0, Math.min(1, recentReactionRate))
+  if (r <= 0 || halfLifeDays <= 0) return 0
 
   const ageDays = Math.max(0, daysSinceFirstReaction)
   const factor = 1 - Math.exp(-LN2 * ageDays / halfLifeDays)
-  return recentReactionRate * factor * halfLifeDays
+  return r * factor * halfLifeDays
 }
 
 /**
@@ -158,32 +237,44 @@ export function getPersistenceLevel(
 
 /**
  * 公開メトリクスを一括計算
+ * algorithm.md仕様に準拠（qualifiedUniqueViewers, uniqueLikers, weightedSupportIndex等）
  *
  * @param input - メトリクス計算用入力
- * @param options - 追加パラメータ
- * @returns 公開メトリクス
+ * @param params - 追加パラメータ
+ * @returns 公開メトリクス（数値は6桁精度）
  */
 export function calculatePublicMetrics(
-  input: MetricsInput,
-  options: Partial<PublicMetricsParams> = {}
+  input: PublicMetricsInput,
+  params?: Partial<PublicMetricsParams>
 ): PublicMetrics {
-  const params = { ...DEFAULT_PUBLIC_METRICS_PARAMS, ...options }
-  const beta = params.beta
-  const priorViews = params.priorViews
-  const priorLikes = params.priorLikes
-  const halfLifeDays = params.halfLifeDays
+  const effectiveParams = { ...DEFAULT_PUBLIC_METRICS_PARAMS, ...params }
+  const { beta, priorViews, priorLikes, priorUniqueLikers, halfLifeDays } = effectiveParams
 
   const supportDensity = calculateSupportDensity(
     input.weightedLikeSum,
-    input.qualifiedUniqueViews,
+    input.qualifiedUniqueViewers,
     beta,
     priorViews,
     priorLikes
   )
 
   const supportRate = calculateSupportRate(
+    input.uniqueLikers,
+    input.qualifiedUniqueViewers,
+    priorViews,
+    priorUniqueLikers
+  )
+
+  const weightedSupportIndex = calculateWeightedSupportIndex(
     input.weightedLikeSum,
-    input.qualifiedUniqueViews,
+    input.qualifiedUniqueViewers,
+    priorViews,
+    priorLikes
+  )
+
+  const weightedSupportRateClamped = calculateWeightedSupportRateClamped(
+    input.weightedLikeSum,
+    input.qualifiedUniqueViewers,
     priorViews,
     priorLikes
   )
@@ -199,17 +290,20 @@ export function calculatePublicMetrics(
   )
   const persistenceLevel = getPersistenceLevel(persistenceDays, halfLifeDays)
 
+  // 数値精度: 6桁に丸める（algorithm.md仕様）
   return {
-    supportDensity,
-    supportRate,
-    culturalViewValue: input.weightedViews,
-    weightedViews: input.weightedViews,
-    qualifiedUniqueViews: input.qualifiedUniqueViews,
-    breadth,
+    supportDensity: round6(supportDensity),
+    supportRate: round6(supportRate),
+    weightedSupportIndex: round6(weightedSupportIndex),
+    weightedSupportRateClamped: round6(weightedSupportRateClamped),
+    culturalViewValue: round6(input.weightedViews),
+    weightedViews: round6(input.weightedViews),
+    qualifiedUniqueViewers: input.qualifiedUniqueViewers,
+    breadth: round6(breadth),
     breadthLevel,
-    persistenceDays,
+    persistenceDays: round6(persistenceDays),
     persistenceLevel,
-    topClusterShare
+    topClusterShare: round6(topClusterShare)
   }
 }
 

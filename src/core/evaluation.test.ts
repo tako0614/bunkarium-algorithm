@@ -11,7 +11,7 @@ import {
   calculatePositionBias,
   calculateClusterFairness,
   compareABTest,
-  evaluate,
+  evaluateOffline,
   type ExposureLog,
   type ItemPopularity
 } from './evaluation'
@@ -166,13 +166,57 @@ describe('evaluation', () => {
         { itemId: 'c', clusterId: 'c3', totalExposures: 10, totalLikes: 1, totalSaves: 0, createdAt: now }
       ]
 
-      const result = evaluate(exposures, popularity, 5)
+      const result = evaluateOffline(exposures, popularity, 5)
 
       expect(result.giniCoefficient).toBeGreaterThanOrEqual(0)
       expect(result.clusterCoverage).toBeGreaterThan(0)
       expect(result.details.totalExposures).toBe(3)
       expect(result.details.uniqueItems).toBe(3)
       expect(result.details.uniqueClusters).toBe(3)
+    })
+
+    test('spec-compliant signature: (dataset: OfflineDataset, config?: OfflineEvalConfig)', () => {
+      const now = Date.now()
+      const exposures = [
+        { userId: 'u1', itemId: 'a', clusterId: 'c1', position: 0, timestamp: now },
+        { userId: 'u2', itemId: 'b', clusterId: 'c2', position: 1, timestamp: now },
+        { userId: 'u3', itemId: 'c', clusterId: 'c3', position: 2, timestamp: now }
+      ]
+      const popularity = [
+        { itemId: 'a', clusterId: 'c1', totalExposures: 100, totalLikes: 10, totalSaves: 5, createdAt: now - 86400000 },
+        { itemId: 'b', clusterId: 'c2', totalExposures: 50, totalLikes: 5, totalSaves: 2, createdAt: now - 172800000 },
+        { itemId: 'c', clusterId: 'c3', totalExposures: 10, totalLikes: 1, totalSaves: 0, createdAt: now }
+      ]
+
+      const result = evaluateOffline({
+        exposures,
+        popularity,
+        totalClusters: 5
+      }, {
+        longTailTopPercentile: 0.3,
+        freshDays: 10
+      })
+
+      expect(result.giniCoefficient).toBeGreaterThanOrEqual(0)
+      expect(result.clusterCoverage).toBeGreaterThan(0)
+      expect(result.details.totalExposures).toBe(3)
+      expect(result.details.freshThresholdDays).toBe(10)
+    })
+
+    test('both signatures produce same results', () => {
+      const now = Date.now()
+      const exposures = [
+        { userId: 'u1', itemId: 'a', clusterId: 'c1', position: 0, timestamp: now }
+      ]
+      const popularity = [
+        { itemId: 'a', clusterId: 'c1', totalExposures: 100, totalLikes: 10, totalSaves: 5, createdAt: now }
+      ]
+
+      const result1 = evaluateOffline(exposures, popularity, 3, { freshDays: 5 })
+      const result2 = evaluateOffline({ exposures, popularity, totalClusters: 3 }, { freshDays: 5 })
+
+      expect(result1.giniCoefficient).toBeCloseTo(result2.giniCoefficient)
+      expect(result1.clusterCoverage).toBeCloseTo(result2.clusterCoverage)
     })
   })
 

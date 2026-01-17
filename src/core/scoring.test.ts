@@ -7,19 +7,19 @@ const baseCandidate: Candidate = {
   type: 'post',
   clusterId: 'c1',
   createdAt: 0,
+  qualityFlags: {
+    moderated: true,
+    spamSuspect: false
+  },
   features: {
     cvsComponents: {
-      likeSignal: 0,
-      contextSignal: 0,
-      collectionSignal: 0,
-      bridgeSignal: 0,
-      sustainSignal: 0
+      like: 0,
+      context: 0,
+      collection: 0,
+      bridge: 0,
+      sustain: 0
     },
-    qualifiedUniqueViews: 1,
-    qualityFlags: {
-      moderated: true,
-      spamSuspect: false
-    }
+    qualifiedUniqueViewers: 1
   }
 }
 
@@ -38,12 +38,9 @@ describe('scoring', () => {
   test('calculatePenalty - penalizes spam content only', () => {
     const candidate: Candidate = {
       ...baseCandidate,
-      features: {
-        ...baseCandidate.features,
-        qualityFlags: {
-          moderated: false,
-          spamSuspect: true
-        }
+      qualityFlags: {
+        moderated: false,
+        spamSuspect: true
       }
     }
 

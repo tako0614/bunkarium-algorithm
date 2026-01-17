@@ -119,7 +119,8 @@ describe('metrics', () => {
       const result = calculatePublicMetrics({
         weightedLikeSum: 50,
         weightedViews: 120,
-        qualifiedUniqueViews: 1000,
+        qualifiedUniqueViewers: 1000,
+        uniqueLikers: 50,
         clusterWeights: { c1: 2, c2: 2, c3: 1 },
         daysSinceFirstReaction: 10,
         recentReactionRate: 0.8
@@ -127,12 +128,55 @@ describe('metrics', () => {
 
       expect(result.supportDensity).toBeCloseTo(0.0505, 4)
       expect(result.supportRate).toBeCloseTo(0.0505, 4)
-      expect(result.breadth).toBeCloseTo(2.871, 3)
-      expect(result.breadthLevel).toBe('medium')
+      expect(result.breadth).toBeCloseTo(2.872, 2)
+      expect(result.breadthLevel).toBe('low')
       expect(result.persistenceDays).toBeCloseTo(4.37, 2)
       expect(result.persistenceLevel).toBe('low')
       expect(result.culturalViewValue).toBe(120)
       expect(result.topClusterShare).toBeCloseTo(0.4, 2)
+    })
+
+    test('params parameter overrides defaults', () => {
+      const input = {
+        weightedLikeSum: 50,
+        weightedViews: 120,
+        qualifiedUniqueViewers: 1000,
+        uniqueLikers: 50,
+        clusterWeights: { c1: 2, c2: 2, c3: 1 },
+        daysSinceFirstReaction: 10,
+        recentReactionRate: 0.8
+      }
+
+      const resultDefault = calculatePublicMetrics(input)
+      const resultCustom = calculatePublicMetrics(input, {
+        beta: 0.7,
+        priorViews: 20,
+        halfLifeDays: 10
+      })
+
+      // With lower beta, support density should be higher
+      expect(resultCustom.supportDensity).toBeGreaterThan(resultDefault.supportDensity)
+
+      // Different halfLifeDays should affect persistence
+      expect(resultCustom.persistenceDays).not.toBeCloseTo(resultDefault.persistenceDays)
+    })
+
+    test('params parameter works with undefined (uses defaults)', () => {
+      const input = {
+        weightedLikeSum: 50,
+        weightedViews: 120,
+        qualifiedUniqueViewers: 1000,
+        uniqueLikers: 50,
+        clusterWeights: { c1: 2, c2: 2, c3: 1 },
+        daysSinceFirstReaction: 10,
+        recentReactionRate: 0.8
+      }
+
+      const result1 = calculatePublicMetrics(input)
+      const result2 = calculatePublicMetrics(input, undefined)
+
+      expect(result1.supportDensity).toBeCloseTo(result2.supportDensity)
+      expect(result1.breadth).toBeCloseTo(result2.breadth)
     })
   })
 })

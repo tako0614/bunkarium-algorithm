@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import {
-  calculateDiminishingMultiplier,
+  calculateCPDiminishingMultiplier,
   calculateCPIssuance,
   calculateCPBalance,
   countRecentEvents,
@@ -17,31 +17,50 @@ import {
 } from './culture-points'
 
 describe('culture-points', () => {
-  describe('calculateDiminishingMultiplier', () => {
+  describe('calculateCPDiminishingMultiplier', () => {
     test('first event has multiplier 1.0', () => {
-      const multiplier = calculateDiminishingMultiplier(1)
+      const multiplier = calculateCPDiminishingMultiplier(1)
       expect(multiplier).toBe(1.0)
     })
 
     test('non-positive counts are treated as 1', () => {
-      const zero = calculateDiminishingMultiplier(0)
-      const negative = calculateDiminishingMultiplier(-3)
+      const zero = calculateCPDiminishingMultiplier(0)
+      const negative = calculateCPDiminishingMultiplier(-3)
       expect(zero).toBe(1.0)
       expect(negative).toBe(1.0)
     })
 
     test('multiplier decreases as events increase', () => {
-      const m1 = calculateDiminishingMultiplier(1)
-      const m5 = calculateDiminishingMultiplier(5)
-      const m10 = calculateDiminishingMultiplier(10)
+      const m1 = calculateCPDiminishingMultiplier(1)
+      const m5 = calculateCPDiminishingMultiplier(5)
+      const m10 = calculateCPDiminishingMultiplier(10)
 
       expect(m1).toBeGreaterThan(m5)
       expect(m5).toBeGreaterThan(m10)
     })
 
     test('multiplier is not below minimum', () => {
-      const multiplier = calculateDiminishingMultiplier(1000)
+      const multiplier = calculateCPDiminishingMultiplier(1000)
       expect(multiplier).toBeGreaterThanOrEqual(DEFAULT_CP_CONFIG.diminishing.minMultiplier)
+    })
+
+    test('spec-compliant signature: (n: number, rate: number, minMultiplier: number)', () => {
+      const multiplier = calculateCPDiminishingMultiplier(10, 0.05, 0.1)
+      // With n=10, rate=0.05: multiplier = 1 / (1 + 0.05 * 9) = 1 / 1.45 ≈ 0.689
+      expect(multiplier).toBeCloseTo(0.689, 2)
+    })
+
+    test('spec signature with min multiplier clamping', () => {
+      const multiplier = calculateCPDiminishingMultiplier(100, 0.1, 0.5)
+      // With n=100, rate=0.1: multiplier = 1 / (1 + 0.1 * 99) = 1 / 10.9 ≈ 0.092
+      // But min is 0.5, so should return 0.5
+      expect(multiplier).toBe(0.5)
+    })
+
+    test('backward-compatible signature still works', () => {
+      const m1 = calculateCPDiminishingMultiplier(10)
+      const m2 = calculateCPDiminishingMultiplier(10, DEFAULT_CP_CONFIG)
+      expect(m1).toBeCloseTo(m2)
     })
   })
 

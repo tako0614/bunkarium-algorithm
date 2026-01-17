@@ -1,0 +1,184 @@
+{
+  "testId": "01-basic-ranking",
+  "description": "Basic ranking with 5 candidates, no exploration, verify order and scores",
+  "input": {
+    "request": {
+      "contractVersion": "1.0",
+      "requestId": "test-01",
+      "clusterVersion": "v1-test",
+      "userState": {
+        "userKey": "user-test-01",
+        "likeWindowCount": 10,
+        "recentClusterExposures": {},
+        "diversitySlider": 0.5,
+        "curatorReputation": 1,
+        "cpEarned90d": 0
+      },
+      "candidates": [
+        {
+          "itemKey": "item-1",
+          "type": "work",
+          "clusterId": "cluster-a",
+          "createdAt": 1704067200000,
+          "qualityFlags": {
+            "moderated": true,
+            "hardBlock": false,
+            "spamSuspect": false
+          },
+          "features": {
+            "prs": 0.8,
+            "cvsComponents": {
+              "like": 0.6,
+              "context": 0.5,
+              "collection": 0.4,
+              "bridge": 0.3,
+              "sustain": 0.2
+            }
+          }
+        },
+        {
+          "itemKey": "item-2",
+          "type": "work",
+          "clusterId": "cluster-b",
+          "createdAt": 1704153600000,
+          "qualityFlags": {
+            "moderated": true,
+            "hardBlock": false,
+            "spamSuspect": false
+          },
+          "features": {
+            "prs": 0.5,
+            "cvsComponents": {
+              "like": 0.7,
+              "context": 0.6,
+              "collection": 0.5,
+              "bridge": 0.4,
+              "sustain": 0.3
+            }
+          }
+        },
+        {
+          "itemKey": "item-3",
+          "type": "work",
+          "clusterId": "cluster-a",
+          "createdAt": 1704240000000,
+          "qualityFlags": {
+            "moderated": true,
+            "hardBlock": false,
+            "spamSuspect": false
+          },
+          "features": {
+            "prs": 0.9,
+            "cvsComponents": {
+              "like": 0.3,
+              "context": 0.2,
+              "collection": 0.2,
+              "bridge": 0.1,
+              "sustain": 0.1
+            }
+          }
+        },
+        {
+          "itemKey": "item-4",
+          "type": "work",
+          "clusterId": "cluster-c",
+          "createdAt": 1704326400000,
+          "qualityFlags": {
+            "moderated": true,
+            "hardBlock": false,
+            "spamSuspect": false
+          },
+          "features": {
+            "prs": 0.3,
+            "cvsComponents": {
+              "like": 0.8,
+              "context": 0.7,
+              "collection": 0.6,
+              "bridge": 0.5,
+              "sustain": 0.4
+            }
+          }
+        },
+        {
+          "itemKey": "item-5",
+          "type": "work",
+          "clusterId": "cluster-b",
+          "createdAt": 1704412800000,
+          "qualityFlags": {
+            "moderated": true,
+            "hardBlock": false,
+            "spamSuspect": false
+          },
+          "features": {
+            "prs": 0.6,
+            "cvsComponents": {
+              "like": 0.5,
+              "context": 0.4,
+              "collection": 0.3,
+              "bridge": 0.2,
+              "sustain": 0.1
+            }
+          }
+        }
+      ],
+      "context": {
+        "surface": "home_mix",
+        "nowTs": 1704499200000
+      },
+      "params": {
+        "explorationBudget": 0
+      }
+    }
+  },
+  "expected": {
+    "ranked": [
+      {
+        "itemKey": "item-3",
+        "finalScore": 0.71125,
+        "reasonCodes": [
+          "NEW_IN_CLUSTER"
+        ]
+      },
+      {
+        "itemKey": "item-5",
+        "finalScore": 0.609746042,
+        "reasonCodes": [
+          "NEW_IN_CLUSTER"
+        ]
+      },
+      {
+        "itemKey": "item-1",
+        "finalScore": 0.706448421,
+        "reasonCodes": [
+          "NEW_IN_CLUSTER"
+        ]
+      },
+      {
+        "itemKey": "item-4",
+        "finalScore": 0.506646842,
+        "reasonCodes": [
+          "GROWING_CONTEXT",
+          "NEW_IN_CLUSTER"
+        ]
+      },
+      {
+        "itemKey": "item-2",
+        "finalScore": 0.572998021,
+        "reasonCodes": [
+          "NEW_IN_CLUSTER"
+        ]
+      }
+    ],
+    "paramSetId": "91a89c520d1c408ef83be750750975f60602125994fb7cf475ed4a042d592572",
+    "constraintsReport": {
+      "usedStrategy": "MMR",
+      "capAppliedCount": 0,
+      "explorationSlotsFilled": 0,
+      "effectiveWeights": {
+        "prs": 0.55,
+        "cvs": 0.25,
+        "dns": 0.2
+      }
+    }
+  }
+}

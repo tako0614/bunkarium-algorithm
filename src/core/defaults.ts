@@ -11,6 +11,8 @@
 export const LIKE_DECAY_DEFAULTS = {
   /** 逓減係数α (デフォルト: 0.05) */
   alpha: 0.05,
+  /** 時間窓（ミリ秒、24時間 = 86400000ms） */
+  likeWindowMs: 86400000,
   /** 時間窓（時間） */
   windowHours: 24,
   /** 連打判定閾値（30秒内の回数） */
@@ -32,18 +34,26 @@ export const SCORING_DEFAULTS = {
   cvsWeight: 0.25,
   /** DNS重み */
   dnsWeight: 0.20,
-  /** CVS各コンポーネントのデフォルト重み */
+  /** CVS各コンポーネントのデフォルト重み（algorithm.md v1.0仕様） */
   cvsComponentWeights: {
-    likeSignal: 1.0,
-    contextSignal: 1.5,
-    collectionSignal: 1.2,
-    bridgeSignal: 2.0,
-    sustainSignal: 0.5
+    like: 0.40,
+    context: 0.25,
+    collection: 0.20,
+    bridge: 0.10,
+    sustain: 0.05
   },
-  /** DNS計算用のクラスタ露出ペナルティ係数 */
-  clusterExposurePenaltyFactor: 0.2,
-  /** 時間減衰の半減期（時間） */
-  timeDecayHalfLifeHours: 168 // 7日
+  /** DNS計算用のクラスタ露出係数（algorithm.md: clusterNoveltyFactor） */
+  clusterNoveltyFactor: 0.06,
+  /** 時間新規性の半減期（時間、algorithm.md: timeHalfLifeHours） */
+  timeHalfLifeHours: 72,
+  /** DNS計算: クラスタ新規性の重み */
+  dnsClusterNoveltyWeight: 0.6,
+  /** DNS計算: 時間新規性の重み */
+  dnsTimeNoveltyWeight: 0.4,
+  /** 探索スコア: DNSの重み */
+  explorationDNSWeight: 0.7,
+  /** 探索スコア: finalScoreの重み */
+  explorationFinalScoreWeight: 0.3
 } as const
 
 // ============================================
@@ -59,8 +69,20 @@ export const DIVERSITY_DEFAULTS = {
   explorationBudget: 0.15,
   /** 多様性スライダーの最小値（ユーザーが下げられない下限） */
   minimumDiversityRatio: 0.1,
-  /** MMR: 関連性 vs 多様性のバランス (0.0-1.0) */
-  mmrLambda: 0.7,
+  /** 多様性スライダー: 重み調整のdeltaMax */
+  sliderDeltaMax: 0.10,
+  /** 多様性スライダー: 重み正規化の最小値 */
+  sliderMinWeight: 0.05,
+  /** 多様性スライダー: 重み正規化の最大値 */
+  sliderMaxWeight: 0.90,
+  /** 多様性スライダー: 重み正規化の最大反復回数 */
+  sliderMaxIterations: 3,
+  /** 探索予算の最小値 */
+  explorationBudgetMin: 0.05,
+  /** 探索予算の最大値 */
+  explorationBudgetMax: 0.30,
+  /** MMR: 類似度ペナルティの重み (algorithm.md v1.0仕様: lambda=0.15) */
+  mmrLambda: 0.15,
   /** DPP: 品質の重み */
   dppQualityWeight: 1.0,
   /** DPP: 多様性の重み */
@@ -125,10 +147,10 @@ export const CULTURE_POINTS_DEFAULTS = {
     qualityEdit: 5,
     communityReward: 10
   },
-  /** 逓減設定 */
+  /** 逓減設定 (algorithm.md v1.0仕様: rate=0.05) */
   diminishing: {
     windowHours: 24,
-    rate: 0.1,
+    rate: 0.05,
     minMultiplier: 0.2
   },
   /** ステーク設定 */
@@ -142,24 +164,21 @@ export const CULTURE_POINTS_DEFAULTS = {
 } as const
 
 // ============================================
-// 理由コード閾値
+// 理由コード閾値 (algorithm.md v1.0仕様準拠)
+// 注: types/index.ts の DEFAULT_EXPLAIN_THRESHOLDS が公式定義
 // ============================================
 
 export const EXPLAIN_THRESHOLDS = {
-  /** コンテキストシグナルの閾値 */
-  contextSignalThreshold: 0.5,
-  /** ブリッジシグナルの閾値 */
-  bridgeSignalThreshold: 0.3,
-  /** サステインシグナルの閾値 */
-  sustainSignalThreshold: 0.4,
-  /** 広がり（クラスタ数）の閾値 */
-  breadthThreshold: 3,
-  /** 新規クラスタ判定用のカウント閾値 */
-  newClusterExposureThreshold: 2,
-  /** 支持密度の閾値 */
-  supportDensityThreshold: 0.5,
-  /** PRS類似判定の閾値 */
-  prsSimilarityThreshold: 0.7
+  /** context component 高閾値 (GROWING_CONTEXT判定) */
+  contextHigh: 0.70,
+  /** bridge component 高閾値 (BRIDGE_SUCCESS判定) */
+  bridgeHigh: 0.70,
+  /** supportDensity 高閾値 (HIGH_SUPPORT_DENSITY判定) */
+  supportDensityHigh: 0.15,
+  /** NEW_IN_CLUSTER の露出上限 */
+  newClusterExposureMax: 2,
+  /** PRS 類似度最小値 (SIMILAR_TO_*判定) */
+  prsSimilarityMin: 0.65
 } as const
 
 // ============================================
@@ -173,6 +192,25 @@ export const EVALUATION_DEFAULTS = {
   freshItemDays: 7,
   /** 位置バイアス分析: 最大位置 */
   maxPositionForAnalysis: 20
+} as const
+
+// ============================================
+// 公開メトリクスパラメータ (algorithm.md v1.0仕様)
+// ============================================
+
+export const PUBLIC_METRICS_PARAMS = {
+  /** 支持密度計算の指数β */
+  beta: 1.0,
+  /** 事前分母（閲覧者数） */
+  priorViews: 10,
+  /** 事前分子（重み付きいいね） */
+  priorLikes: 1,
+  /** 事前ユニークいいね者数 */
+  priorUniqueLikers: 1,
+  /** 持続性計算の半減期（日） */
+  halfLifeDays: 14,
+  /** メトリクス集計期間（日） */
+  metricsWindowDays: 14
 } as const
 
 // ============================================
@@ -197,6 +235,5 @@ export type ScoringDefaults = typeof SCORING_DEFAULTS
 export type DiversityDefaults = typeof DIVERSITY_DEFAULTS
 export type ReputationDefaults = typeof REPUTATION_DEFAULTS
 export type CulturePointsDefaults = typeof CULTURE_POINTS_DEFAULTS
-export type ExplainThresholds = typeof EXPLAIN_THRESHOLDS
 export type EvaluationDefaults = typeof EVALUATION_DEFAULTS
 export type NumericalDefaults = typeof NUMERICAL_DEFAULTS

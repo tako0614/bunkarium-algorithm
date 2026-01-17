@@ -17,6 +17,8 @@ export {
   // Metrics
   calculateSupportDensity,
   calculateSupportRate,
+  calculateWeightedSupportIndex,
+  calculateWeightedSupportRateClamped,
   calculateBreadth,
   getBreadthLevel,
   calculatePersistence,
@@ -35,6 +37,7 @@ export {
   primaryRank,
   diversityRerank,
   rank,
+  rankSync,
 
   // Explain
   determineReasonCodes,
@@ -48,6 +51,7 @@ export {
   getCRLevel,
   evaluateBridgeSuccess,
   evaluateNoteSettlement,
+  calculateViewWeight,
   DEFAULT_CR_CONFIG,
   DEFAULT_CR_WEIGHTS,
 
@@ -85,7 +89,7 @@ export {
   calculateFreshItemExposureRate,
   calculateClusterFairness,
   calculateFairnessDivergence,
-  evaluate,
+  evaluateOffline,
   compareABTest,
   generateEvaluationSummary,
 
@@ -115,7 +119,7 @@ export {
   DEFAULT_LSH_CONFIG,
 
   // Culture Points (CP)
-  calculateDiminishingMultiplier,
+  calculateCPDiminishingMultiplier,
   calculateCPIssuance,
   calculateCPBalance,
   countRecentEvents,

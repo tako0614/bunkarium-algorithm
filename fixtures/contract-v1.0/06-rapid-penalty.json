@@ -1,0 +1,127 @@
+{
+  "testId": "06-rapid-penalty",
+  "description": "Verify rapid penalty application with recentLikeCount30s >= 50",
+  "input": {
+    "request": {
+      "contractVersion": "1.0",
+      "requestId": "test-06",
+      "clusterVersion": "v1-test",
+      "userState": {
+        "userKey": "user-test-06",
+        "likeWindowCount": 100,
+        "recentLikeCount30s": 55,
+        "recentClusterExposures": {},
+        "diversitySlider": 0.5,
+        "curatorReputation": 1,
+        "cpEarned90d": 0
+      },
+      "candidates": [
+        {
+          "itemKey": "item-1",
+          "type": "work",
+          "clusterId": "cluster-a",
+          "createdAt": 1704067200000,
+          "qualityFlags": {
+            "moderated": true
+          },
+          "features": {
+            "prs": 0.8,
+            "cvsComponents": {
+              "like": 0.7,
+              "context": 0.6,
+              "collection": 0.5,
+              "bridge": 0.4,
+              "sustain": 0.3
+            }
+          }
+        },
+        {
+          "itemKey": "item-2",
+          "type": "work",
+          "clusterId": "cluster-b",
+          "createdAt": 1704153600000,
+          "qualityFlags": {
+            "moderated": true
+          },
+          "features": {
+            "prs": 0.75,
+            "cvsComponents": {
+              "like": 0.65,
+              "context": 0.55,
+              "collection": 0.45,
+              "bridge": 0.35,
+              "sustain": 0.25
+            }
+          }
+        },
+        {
+          "itemKey": "item-3",
+          "type": "work",
+          "clusterId": "cluster-c",
+          "createdAt": 1704240000000,
+          "qualityFlags": {
+            "moderated": true
+          },
+          "features": {
+            "prs": 0.7,
+            "cvsComponents": {
+              "like": 0.6,
+              "context": 0.5,
+              "collection": 0.4,
+              "bridge": 0.3,
+              "sustain": 0.2
+            }
+          }
+        }
+      ],
+      "context": {
+        "surface": "home_mix",
+        "nowTs": 1704499200000
+      },
+      "params": {
+        "explorationBudget": 0,
+        "rapidPenaltyThreshold": 50,
+        "rapidPenaltyMultiplier": 0.1
+      }
+    }
+  },
+  "expected": {
+    "ranked": [
+      {
+        "itemKey": "item-1",
+        "finalScore": 0.731448421,
+        "reasonCodes": [
+          "NEW_IN_CLUSTER"
+        ]
+      },
+      {
+        "itemKey": "item-2",
+        "finalScore": 0.697998021,
+        "reasonCodes": [
+          "NEW_IN_CLUSTER"
+        ]
+      },
+      {
+        "itemKey": "item-3",
+        "finalScore": 0.66625,
+        "reasonCodes": [
+          "NEW_IN_CLUSTER"
+        ]
+      }
+    ],
+    "paramSetId": "91a89c520d1c408ef83be750750975f60602125994fb7cf475ed4a042d592572",
+    "constraintsReport": {
+      "usedStrategy": "MMR",
+      "capAppliedCount": 0,
+      "explorationSlotsFilled": 0,
+      "effectiveWeights": {
+        "prs": 0.55,
+        "cvs": 0.25,
+        "dns": 0.2
+      }
+    }
+  },
+  "metadata": {
+    "note": "User has likeWindowCount=100 and recentLikeCount30s=55 (>= 50 threshold), so rapid penalty should be applied. The like weight calculation should show isRapid=true and rapidPenaltyApplied=true. This affects CVS component calculations that depend on weighted like signals."
+  }
+}
