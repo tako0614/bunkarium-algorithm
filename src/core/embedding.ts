@@ -546,7 +546,8 @@ export function kmeans(
   k: number,
   maxIterations: number = 100
 ): KMeansResult {
-  if (data.length === 0 || k <= 0) {
+  // Guard: ensure data array is valid and non-empty
+  if (data.length === 0 || k <= 0 || !data[0]) {
     return { centroids: [], assignments: [], iterations: 0, inertia: 0 }
   }
 

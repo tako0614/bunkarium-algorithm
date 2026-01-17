@@ -264,8 +264,9 @@ export function buildDPPKernel(
   for (let i = 0; i < n; i++) {
     for (let j = 0; j < n; j++) {
       // 品質スコア (正規化)
-      const qi = Math.pow(items[i].score, config.qualityWeight)
-      const qj = Math.pow(items[j].score, config.qualityWeight)
+      // Guard: ensure score is non-negative to avoid NaN from Math.pow(negative, fractional)
+      const qi = Math.pow(Math.max(0, items[i].score), config.qualityWeight)
+      const qj = Math.pow(Math.max(0, items[j].score), config.qualityWeight)
 
       // 類似度
       const similarity = calculateSimilarity(items[i], items[j], 'cosine')

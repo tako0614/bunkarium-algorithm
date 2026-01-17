@@ -100,7 +100,7 @@ export const DEFAULT_CP_CONFIG: CPIssuanceConfig = {
   },
   diminishing: {
     windowHours: 24,
-    rate: 0.1,
+    rate: 0.05,  // algorithm.md v1.0 spec: 0.05
     minMultiplier: 0.2
   },
   stake: {

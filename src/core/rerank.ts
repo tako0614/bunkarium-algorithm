@@ -12,7 +12,7 @@ import { DEFAULT_PARAMS, DEFAULT_SURFACE_POLICIES } from '../types'
 import { ALGORITHM_ID, ALGORITHM_VERSION, CONTRACT_VERSION } from '../constants'
 import { calculateMixedScore } from './scoring'
 import { determineReasonCodes } from './explain'
-import { cosineSimilarity } from './diversity'
+import { cosineSimilarity, dppSampleGreedy, type DiversityItem } from './diversity'
 
 // ============================================================
 // 数値精度とハッシュユーティリティ
@@ -175,6 +175,37 @@ function adjustWeightsForDiversitySlider(
 // ============================================================
 
 /**
+ * MMR類似度キャッシュ（パフォーマンス最適化）
+ * キー: "itemKeyA|itemKeyB" (alphabetical order)
+ */
+class SimilarityCache {
+  private cache: Map<string, number> = new Map()
+
+  private makeKey(a: string, b: string): string {
+    return a < b ? `${a}|${b}` : `${b}|${a}`
+  }
+
+  get(candA: Candidate, candB: Candidate): number | undefined {
+    const key = this.makeKey(candA.itemKey, candB.itemKey)
+    return this.cache.get(key)
+  }
+
+  set(candA: Candidate, candB: Candidate, similarity: number): void {
+    const key = this.makeKey(candA.itemKey, candB.itemKey)
+    this.cache.set(key, similarity)
+  }
+
+  computeIfAbsent(candA: Candidate, candB: Candidate, compute: () => number): number {
+    const key = this.makeKey(candA.itemKey, candB.itemKey)
+    const cached = this.cache.get(key)
+    if (cached !== undefined) return cached
+    const value = compute()
+    this.cache.set(key, value)
+    return value
+  }
+}
+
+/**
  * MMR類似度計算（algorithm.md仕様）
  * cosineを[0,1]にマッピング: sim = clamp(0, 1, (rawCosine + 1) / 2)
  */
@@ -188,13 +219,20 @@ function calculateMMRSimilarity(candA: Candidate, candB: Candidate): number {
 }
 
 /**
- * 選択済みアイテムとの最大類似度を計算
+ * 選択済みアイテムとの最大類似度を計算（キャッシュ付き）
  */
-function maxSimilarityWithSelected(candidate: Candidate, selected: Candidate[]): number {
+function maxSimilarityWithSelected(
+  candidate: Candidate,
+  selected: Candidate[],
+  cache?: SimilarityCache
+): number {
   if (selected.length === 0) return 0
   let maxSim = 0
   for (const item of selected) {
-    maxSim = Math.max(maxSim, calculateMMRSimilarity(candidate, item))
+    const sim = cache
+      ? cache.computeIfAbsent(candidate, item, () => calculateMMRSimilarity(candidate, item))
+      : calculateMMRSimilarity(candidate, item)
+    maxSim = Math.max(maxSim, sim)
   }
   return maxSim
 }
@@ -263,6 +301,8 @@ interface RerankOptions {
   recentClusterExposures: Record<string, number>
   explainThresholds: AlgorithmParams['explainThresholds']
   newClusterExposureMax: number
+  /** Reranking strategy: MMR (default) or DPP */
+  rerankStrategy?: 'MMR' | 'DPP'
 }
 
 interface RerankResult {
@@ -290,7 +330,8 @@ export function diversityRerank(
     requestSeed,
     recentClusterExposures,
     explainThresholds,
-    newClusterExposureMax
+    newClusterExposureMax,
+    rerankStrategy = 'MMR'
   } = options
 
   const N = Math.min(diversityCapN, scoredCandidates.length)
@@ -309,6 +350,14 @@ export function diversityRerank(
       effectiveWeights
     }
   }
+
+  // DPP strategy
+  if (rerankStrategy === 'DPP' && N <= 100) {
+    return diversityRerankDPP(scoredCandidates, options, effectiveWeights)
+  }
+
+  // Create similarity cache for performance
+  const similarityCache = new SimilarityCache()
 
   const result: Array<ScoredCandidate & { reasonCodes: ReasonCode[] }> = []
   const remaining = [...scoredCandidates]
@@ -403,7 +452,7 @@ export function diversityRerank(
         break
       }
     } else {
-      // MMR: baseScore - lambda * maxSim
+      // MMR: baseScore - lambda * maxSim (with cache)
       let bestMMRScore = -Infinity
 
       for (let i = 0; i < remaining.length; i++) {
@@ -414,7 +463,7 @@ export function diversityRerank(
           continue
         }
 
-        const maxSim = maxSimilarityWithSelected(candidate, result)
+        const maxSim = maxSimilarityWithSelected(candidate, result, similarityCache)
         const mmrScore = candidate.score.finalScore - mmrSimilarityPenalty * maxSim
 
         if (mmrScore > bestMMRScore) {
@@ -427,12 +476,14 @@ export function diversityRerank(
 
     if (!selectedCandidate || selectedIdx === -1) {
       // cluster cap で全候補がブロックされた場合、capを無視して選択
+      let bestFallbackScore = -Infinity
       for (let i = 0; i < remaining.length; i++) {
         const candidate = remaining[i]
-        const maxSim = maxSimilarityWithSelected(candidate, result)
+        const maxSim = maxSimilarityWithSelected(candidate, result, similarityCache)
         const mmrScore = candidate.score.finalScore - mmrSimilarityPenalty * maxSim
 
-        if (!selectedCandidate || mmrScore > (selectedCandidate.score.finalScore - mmrSimilarityPenalty * maxSimilarityWithSelected(selectedCandidate, result))) {
+        if (mmrScore > bestFallbackScore) {
+          bestFallbackScore = mmrScore
           selectedCandidate = candidate
           selectedIdx = i
         }
@@ -464,6 +515,83 @@ export function diversityRerank(
       capAppliedCount,
       explorationSlotsRequested,
       explorationSlotsFilled,
+      effectiveDiversityCapK: effectiveK,
+      effectiveExplorationBudget,
+      effectiveWeights
+    },
+    effectiveWeights
+  }
+}
+
+/**
+ * DPP-based diversity reranking（algorithm.md仕様: DPP戦略）
+ *
+ * DPP (Determinantal Point Process) を使用した多様性リランキング。
+ * 小規模な候補セット（N <= 100）に適している。
+ */
+function diversityRerankDPP(
+  scoredCandidates: ScoredCandidate[],
+  options: RerankOptions,
+  effectiveWeights: ScoreWeights
+): RerankResult {
+  const {
+    diversityCapN,
+    effectiveK,
+    effectiveExplorationBudget,
+    recentClusterExposures,
+    explainThresholds
+  } = options
+
+  const N = Math.min(diversityCapN, scoredCandidates.length)
+
+  // DiversityItem形式に変換
+  const diversityItems: DiversityItem[] = scoredCandidates.slice(0, Math.min(100, scoredCandidates.length)).map(c => ({
+    id: c.itemKey,
+    score: c.score.finalScore,
+    clusterId: c.clusterId,
+    embedding: c.features.embedding
+  }))
+
+  // DPPサンプリング実行
+  const { selected } = dppSampleGreedy(diversityItems, N)
+  const selectedIds = new Set(selected.map(item => item.id))
+
+  // 選択された候補を順序付けて返す
+  const result: Array<ScoredCandidate & { reasonCodes: ReasonCode[] }> = []
+  const clusterCounts: Record<string, number> = {}
+  let capAppliedCount = 0
+
+  for (const item of selected) {
+    const candidate = scoredCandidates.find(c => c.itemKey === item.id)
+    if (!candidate) continue
+
+    // cluster cap チェック
+    const currentCount = clusterCounts[candidate.clusterId] || 0
+    if (currentCount >= effectiveK) {
+      capAppliedCount++
+      // DPPでは選択済みなので追加するが、capを記録
+    }
+
+    const reasonCodes = determineReasonCodes(
+      candidate,
+      recentClusterExposures,
+      explainThresholds
+    )
+
+    result.push({
+      ...candidate,
+      reasonCodes
+    })
+    clusterCounts[candidate.clusterId] = currentCount + 1
+  }
+
+  return {
+    reranked: result,
+    report: {
+      usedStrategy: 'DPP',
+      capAppliedCount,
+      explorationSlotsRequested: 0,
+      explorationSlotsFilled: 0,
       effectiveDiversityCapK: effectiveK,
       effectiveExplorationBudget,
       effectiveWeights
@@ -549,7 +677,8 @@ export async function rank(request: RankRequest): Promise<RankResponse> {
       requestSeed: request.requestSeed ?? request.requestId,
       recentClusterExposures: request.userState.recentClusterExposures,
       explainThresholds,
-      newClusterExposureMax: explainThresholds.newClusterExposureMax
+      newClusterExposureMax: explainThresholds.newClusterExposureMax,
+      rerankStrategy: fullParams.rerankStrategy
     },
     effectiveWeights
   )
@@ -653,7 +782,8 @@ export function rankSync(request: RankRequest): RankResponse {
       requestSeed: request.requestSeed ?? request.requestId,
       recentClusterExposures: request.userState.recentClusterExposures,
       explainThresholds,
-      newClusterExposureMax: explainThresholds.newClusterExposureMax
+      newClusterExposureMax: explainThresholds.newClusterExposureMax,
+      rerankStrategy: fullParams.rerankStrategy
     },
     effectiveWeights
   )
