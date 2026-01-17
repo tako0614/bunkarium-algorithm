@@ -125,7 +125,7 @@ m_final = max(minMultiplier, multiplier)
 ```
 
 Where:
-- `rate`: 0.1 (default)
+- `rate`: 0.05 (default)
 - `minMultiplier`: 0.2 (default, 20% floor)
 
 **Example** (noteAdopted events in 24h):

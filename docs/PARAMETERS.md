@@ -31,7 +31,7 @@ This guide helps you understand and tune algorithm parameters for different use 
 | `diversityCapN` | 20 | 10-50 | Window size |
 | `diversityCapK` | 5 | 2-10 | Cluster cap |
 | `explorationBudget` | 0.15 | 0.0-0.30 | Random sampling |
-| `mmrLambda` | 0.7 | 0.0-1.0 | Relevance vs diversity |
+| `mmrLambda` | 0.15 | 0.0-1.0 | Relevance vs diversity |
 | **Public Metrics** |
 | `beta` | 1.0 | 0.5-2.0 | Density sensitivity |
 | `priorViews` | 10 | 1-100 | Bayesian prior |
@@ -43,7 +43,7 @@ This guide helps you understand and tune algorithm parameters for different use 
 | `decayHalfLifeDays` | 90 | 30-365 | CR decay |
 | `learningRate` | 0.1 | 0.01-0.5 | Update speed |
 | **CP** |
-| `diminishing.rate` | 0.1 | 0.05-0.30 | Issuance decay |
+| `diminishing.rate` | 0.05 | 0.05-0.30 | Issuance decay |
 | `diminishing.minMultiplier` | 0.2 | 0.1-0.5 | Issuance floor |
 | `stake.minStakeAmount` | 50 | 10-500 | Min stake CP |
 | `stake.successBonusRate` | 0.2 | 0.0-0.5 | Success bonus |
@@ -398,7 +398,7 @@ const params = {
 
 Balance between relevance and diversity in MMR reranking.
 
-**Default**: `0.7`
+**Default**: `0.15`
 
 **Formula**: `MMR = λ × relevance - (1 - λ) × similarity`
 
@@ -565,7 +565,7 @@ const params = {
 
 How quickly CP issuance diminishes with frequent events.
 
-**Default**: `0.1`
+**Default**: `0.05`
 
 **Formula**: `multiplier = 1 / (1 + rate × count)`
 
