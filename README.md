@@ -24,7 +24,13 @@ Like decay:
 ```ts
 import { calculateLikeWeight } from '@bunkarium/algorithm'
 
-const { weight, supportPowerPercent } = calculateLikeWeight(5, 0.05)
+const { weight, supportPowerPercent, rapidPenaltyApplied } = calculateLikeWeight({
+  likeWindowCount: 5,
+  alpha: 0.05,
+  recentLikeCount30s: 12,
+  rapidPenaltyThreshold: 50,
+  rapidPenaltyMultiplier: 0.1
+})
 ```
 
 Public metrics:
@@ -52,30 +58,48 @@ const { ranked, constraintsReport } = rank({
   userState,
   candidates,
   context: { surface: 'home_mix', nowTs: Date.now() },
-  params: { diversityCapN: 20, diversityCapK: 5, explorationBudget: 0.15 }
+  params: {
+    diversityCapN: 20,
+    diversityCapK: 5,
+    explorationBudget: 0.15,
+    rerankMinCandidatesPerCluster: 1,
+    publicMetrics: {
+      beta: 1.0,
+      priorViews: 10,
+      priorLikes: 1,
+      halfLifeDays: 14,
+      metricsWindowDays: 14
+    },
+    variantId: 'default'
+  }
 })
 ```
+`RankResponse.paramSetId` mirrors the applied `variantId` for audit trails.
 
 ## Detailed Specification
 
 ### Inputs
-- UserStateSnapshot: `userKey`, `likeWindowCount24h`, `recentLikeCount30s`,
+- UserStateSnapshot: `userKey`, `likeWindowCount`, `recentLikeCount30s`,
   `recentClusterExposures`, `diversitySlider`, `curatorReputation`, `cpEarned90d`
 - Candidate: `itemKey`, `type`, `clusterId`, `createdAt`, `features`
 - CandidateFeatures: `cvsComponents`, `qualifiedUniqueViews`, `qualityFlags`,
   `embedding?`, `prs?`, `prsSource?`, `publicMetrics?`
+- QualityFlags: `moderated` (passed moderation for the surface), `hardBlock?`, `spamSuspect`
+- AlgorithmParams.surfacePolicies: `requireModerated` per surface (default true)
 
 ### Like decay
 ```
 w(u) = 1 / (1 + alpha * (n - 1))
 ```
 - Rapid penalty: if `recentLikeCount30s >= 50` in 30s, apply `weight * 0.1`.
+- `calculateLikeWeight` applies the rapid penalty when `recentLikeCount30s` is provided.
+- `likeWindowMs` defines the aggregation window (default 24h).
 
 ### Cultural View Value (spec)
 - `crMultiplier = getCRMultiplier(CR)` (0.5 to 2.0)
 - `cpMultiplier = clamp(0.8, 1.2, 0.8 + 0.2 * log10(1 + CP_earned_90d / 50))`
 - `viewWeight = clamp(0.2, 2.0, crMultiplier * cpMultiplier)`
-- Unique view: one add per user/target per 24h window.
+- Dedup/aggregation (24h window, fraud filtering) is app responsibility.
 - `weightedViews = sum(viewWeight)` and `qualifiedUniqueViews` tracked separately.
 - Support metrics use `qualifiedUniqueViews` as the denominator in v1.0.
 
@@ -85,7 +109,15 @@ w(u) = 1 / (1 + alpha * (n - 1))
 - `breadth = exp(entropy(clusterDistribution))` (`clusterWeights` is normalized internally)
 - `topClusterShare = max(p_i)`
 - `persistence = recentReactionRate * (1 - exp(-ln(2) * ageDays / halfLifeDays)) * halfLifeDays`
-- Recommended: `clusterWeights` built from weighted likes per cluster (`weight_snapshot * user_cr_snapshot`).
+- `CRm = getCRMultiplier(CR)` for weighted like aggregation
+- Recommended: `clusterWeights` built from weighted likes per cluster (`weight_snapshot * getCRMultiplier(user_cr_snapshot)`).
+- Default params (v1.0 contract): `priorLikes=1`, `priorViews=10`, `beta=1.0`, `halfLifeDays=14`.
+- `persistenceLevel` thresholds scale with `halfLifeDays` (high >= 0.8*halfLifeDays, medium >= 0.5*halfLifeDays).
+- Default aggregation window: `metricsWindowDays = 14` (applies to `clusterWeights`).
+- `weightedLikeSum` / `qualifiedUniqueViews` / `weightedViews` must use the same window as `metricsWindowDays` for v1.0 conformance.
+- `weightedLikeSum` should use `weight_snapshot * getCRMultiplier(user_cr_snapshot)`.
+- The same values can be passed as `RankRequest.params.publicMetrics` to keep the contract explicit.
+- If you override them, treat it as a named algorithm variant (`variantId`).
 
 Note: `qualifiedUniqueViews` is expected to be deduped and fraud-filtered. It
 remains the denominator for v1.0. `weightedViews` is
@@ -100,9 +132,15 @@ CVS = a*LikeSignal + b*ContextSignal + d*CollectionSignal
 - DNS: `0.6 * clusterNovelty + 0.4 * timeNovelty`
   - `clusterNovelty = 1 / (1 + exposureCount * factor)`
   - `timeNovelty = exp(-ln(2) * ageHours / halfLifeHours)`
-- PRS/CVS/DNS are clamped to 0..1 in the algorithm.
+- PRS/CVS/DNS are expected to be normalized to 0..1 by the application; the
+  algorithm only clamps as a safety guard.
+- Recommended normalization: quantile-based 0..1 over a trailing window.
 - Penalty:
-  - `spamSuspect`: +0.5
+  - `hardBlock` candidates are excluded
+  - `moderated=false` is excluded when the surface requires moderation
+  - `spamSuspect`: +0.5 (0..1 scale)
+  - quality penalty is clamped to 0..1; similarity penalty is added in rerank
+  - finalScore may be negative
   - similarity penalties are applied in reranking only
 ```
 finalScore = w_prs*PRS + w_cvs*CVS + w_dns*DNS - penalty
@@ -112,13 +150,19 @@ finalScore = w_prs*PRS + w_cvs*CVS + w_dns*DNS - penalty
 - Apply caps to the top N (default 20).
 - Limit same-cluster exposure to K (default 5).
 - Exploration budget default 0.15.
-- Rerank candidates are capped (default 200).
+- Rerank candidates use per-cluster minimums (default 1) and may expand beyond the base cap (default 200).
 - MMR/DPP variants supported with stabilized determinant math.
 - Deterministic tie-break: `finalScore desc -> createdAt desc -> itemKey asc`.
+- `requestSeed` is used for deterministic sampling in exploration slots.
 
 ### Explain codes
-`SIMILAR_TO_SAVED`, `GROWING_CONTEXT`, `BRIDGE_SUCCESS`, `DIVERSITY_SLOT`,
-`EXPLORATION`, `HIGH_SUPPORT_DENSITY`, `FOLLOWING`, `NEW_IN_CLUSTER`, `EDITORIAL`
+`SIMILAR_TO_SAVED`, `SIMILAR_TO_LIKED`, `FOLLOWING`, `GROWING_CONTEXT`,
+`BRIDGE_SUCCESS`, `DIVERSITY_SLOT`, `EXPLORATION`, `HIGH_SUPPORT_DENSITY`,
+`TRENDING_IN_CLUSTER`, `NEW_IN_CLUSTER`
+Trigger conditions and priority are specified in `docs/SPECS/algorithm.md`.
+SurfaceReasonCode: `EDITORIAL` (assigned by the feed layer).
+`RankedItem.surfaceReasonCodes` can carry surface-specific reasons.
+Use `SURFACE_REASON_DESCRIPTIONS` for labels.
 
 ### Curator Reputation (CR)
 - Weighted events with time decay (half-life 90 days).
@@ -158,6 +202,7 @@ finalScore = w_prs*PRS + w_cvs*CVS + w_dns*DNS - penalty
 ## Specifications (monorepo)
 - `docs/SPECS/algorithm.md`
 - `docs/SPECS/cultural-contribution.md`
+- `docs/SPECS/metrics-pipeline.md`
 
 ## Build and Test
 ```bash

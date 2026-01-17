@@ -107,6 +107,11 @@ describe('metrics', () => {
       expect(getPersistenceLevel(14)).toBe('high')
       expect(getPersistenceLevel(30)).toBe('high')
     })
+
+    test('uses halfLifeDays thresholds', () => {
+      expect(getPersistenceLevel(8, 10)).toBe('high')
+      expect(getPersistenceLevel(5, 10)).toBe('medium')
+    })
   })
 
   describe('calculatePublicMetrics', () => {

@@ -1,5 +1,8 @@
 ﻿import type { PublicMetrics, MetricsInput } from '../types'
 
+import type { PublicMetricsParams } from '../types'
+import { DEFAULT_PUBLIC_METRICS_PARAMS } from '../types'
+
 const LN2 = Math.log(2)
 
 function getClusterDistribution(clusterWeights: Record<string, number>): number[] {
@@ -22,7 +25,7 @@ function getClusterDistribution(clusterWeights: Record<string, number>): number[
 /**
  * 支持密度（Support Density）を計算
  *
- * SD(c) = Σ(w(u) * CR(u)) / UV(c)^β
+ * SD(c) = (Σ(w(u) * CR(u)) + priorLikes) / (QUV + priorViews)^β
  *
  * @param weightedLikeSum - 重み付きいいね合計
  * @param qualifiedUniqueViews - 不正排除済みユニーク閲覧数
@@ -141,9 +144,15 @@ export function calculatePersistence(
  * @param persistenceDays - 持続日数
  * @returns レベル（low/medium/high）
  */
-export function getPersistenceLevel(persistenceDays: number): 'low' | 'medium' | 'high' {
-  if (persistenceDays >= 14) return 'high'
-  if (persistenceDays >= 7) return 'medium'
+export function getPersistenceLevel(
+  persistenceDays: number,
+  halfLifeDays: number = DEFAULT_PUBLIC_METRICS_PARAMS.halfLifeDays
+): 'low' | 'medium' | 'high' {
+  if (halfLifeDays <= 0) return 'low'
+  const highThreshold = halfLifeDays * 0.8
+  const mediumThreshold = halfLifeDays * 0.5
+  if (persistenceDays >= highThreshold) return 'high'
+  if (persistenceDays >= mediumThreshold) return 'medium'
   return 'low'
 }
 
@@ -156,17 +165,13 @@ export function getPersistenceLevel(persistenceDays: number): 'low' | 'medium' |
  */
 export function calculatePublicMetrics(
   input: MetricsInput,
-  options: {
-    beta?: number
-    priorViews?: number
-    priorLikes?: number
-    persistenceHalfLifeDays?: number
-  } = {}
+  options: Partial<PublicMetricsParams> = {}
 ): PublicMetrics {
-  const beta = options.beta ?? 1.0
-  const priorViews = options.priorViews ?? 10
-  const priorLikes = options.priorLikes ?? 1
-  const persistenceHalfLifeDays = options.persistenceHalfLifeDays ?? 14
+  const params = { ...DEFAULT_PUBLIC_METRICS_PARAMS, ...options }
+  const beta = params.beta
+  const priorViews = params.priorViews
+  const priorLikes = params.priorLikes
+  const halfLifeDays = params.halfLifeDays
 
   const supportDensity = calculateSupportDensity(
     input.weightedLikeSum,
@@ -190,9 +195,9 @@ export function calculatePublicMetrics(
   const persistenceDays = calculatePersistence(
     input.daysSinceFirstReaction,
     input.recentReactionRate,
-    persistenceHalfLifeDays
+    halfLifeDays
   )
-  const persistenceLevel = getPersistenceLevel(persistenceDays)
+  const persistenceLevel = getPersistenceLevel(persistenceDays, halfLifeDays)
 
   return {
     supportDensity,

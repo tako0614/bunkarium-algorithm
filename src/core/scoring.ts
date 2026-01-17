@@ -70,7 +70,7 @@ export function calculatePenalty(candidate: Candidate): number {
     penalty += 0.5
   }
 
-  return penalty
+  return clamp01(penalty)
 }
 
 /**

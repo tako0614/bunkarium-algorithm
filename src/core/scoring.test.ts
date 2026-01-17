@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { calculateDNS } from './scoring'
+import { calculateDNS, calculatePenalty } from './scoring'
 import type { Candidate } from '../types'
 
 const baseCandidate: Candidate = {
@@ -33,5 +33,21 @@ describe('scoring', () => {
 
     const score = calculateDNS(candidate, {}, now)
     expect(score).toBeLessThanOrEqual(1)
+  })
+
+  test('calculatePenalty - penalizes spam content only', () => {
+    const candidate: Candidate = {
+      ...baseCandidate,
+      features: {
+        ...baseCandidate.features,
+        qualityFlags: {
+          moderated: false,
+          spamSuspect: true
+        }
+      }
+    }
+
+    const penalty = calculatePenalty(candidate)
+    expect(penalty).toBe(0.5)
   })
 })

@@ -2,22 +2,31 @@
 // Algorithm Contract Types
 // ============================================================
 
+/** Surface ids */
+export type SurfaceId =
+  | 'home_mix'
+  | 'home_diverse'
+  | 'following'
+  | 'scenes'
+  | 'search'
+  | 'work_page'
+
 /** アルゴリズムパラメータ */
 export interface AlgorithmParams {
   /** いいね逓減の窓（ミリ秒） デフォルト: 24時間 */
-  likeDecayWindowMs: number
+  likeWindowMs: number
   /** いいね逓減係数α デフォルト: 0.05 */
   likeDecayAlpha: number
   /** 連打判定閾値（30秒内の回数） デフォルト: 50 */
   rapidPenaltyThreshold: number
   /** 連打ペナルティ乗数 デフォルト: 0.1 */
   rapidPenaltyMultiplier: number
-  /** 支持率/支持密度の事前分母 デフォルト: 10 */
-  supportRatePriorViews: number
-  /** 支持率/支持密度の事前分子 デフォルト: 1 */
-  supportRatePriorLikes: number
-  /** 持続の半減期（日） デフォルト: 14 */
-  persistenceHalfLifeDays: number
+  /** 公開メトリクスのパラメータ */
+  publicMetrics: PublicMetricsParams
+  /** パラメータセットID（監査/計測用、任意） */
+  variantId?: string
+  /** Per-surface moderation requirements */
+  surfacePolicies?: Partial<Record<SurfaceId, SurfacePolicy>>
   /** 多様性制約: 直近N件 デフォルト: 20 */
   diversityCapN: number
   /** 多様性制約: 同一クラスタ上限K デフォルト: 5 */
@@ -26,6 +35,8 @@ export interface AlgorithmParams {
   explorationBudget: number
   /** 再ランキング対象の最大件数 デフォルト: 200 */
   rerankMaxCandidates: number
+  /** Minimum candidates per cluster (default: 1) */
+  rerankMinCandidatesPerCluster: number
   /** スコア重み */
   weights: ScoreWeights
 }
@@ -38,19 +49,56 @@ export interface ScoreWeights {
   dns: number
 }
 
+export interface PublicMetricsParams {
+  /** 支持密度の指数β デフォルト: 1.0 */
+  beta: number
+  /** 支持率/支持密度の事前分母 デフォルト: 10 */
+  priorViews: number
+  /** 支持率/支持密度の事前分子 デフォルト: 1 */
+  priorLikes: number
+  /** 持続の半減期（日） デフォルト: 14 */
+  halfLifeDays: number
+  /** 公開メトリクスの集計窓（日） デフォルト: 14 */
+  metricsWindowDays: number
+}
+
+export interface SurfacePolicy {
+  /** trueの場合、moderated=falseを除外する */
+  requireModerated: boolean
+}
+
+export const DEFAULT_PUBLIC_METRICS_PARAMS: PublicMetricsParams = {
+  beta: 1.0,
+  priorViews: 10,
+  priorLikes: 1,
+  halfLifeDays: 14,
+  metricsWindowDays: 14
+}
+
+export const DEFAULT_SURFACE_POLICIES: Record<SurfaceId, SurfacePolicy> = {
+  home_mix: { requireModerated: true },
+  home_diverse: { requireModerated: true },
+  following: { requireModerated: true },
+  scenes: { requireModerated: true },
+  search: { requireModerated: true },
+  work_page: { requireModerated: true }
+}
+
+
 /** デフォルトパラメータ */
 export const DEFAULT_PARAMS: AlgorithmParams = {
-  likeDecayWindowMs: 24 * 60 * 60 * 1000, // 24h
+  likeWindowMs: 24 * 60 * 60 * 1000, // 24h
   likeDecayAlpha: 0.05,
   rapidPenaltyThreshold: 50,
   rapidPenaltyMultiplier: 0.1,
-  supportRatePriorViews: 10,
-  supportRatePriorLikes: 1,
-  persistenceHalfLifeDays: 14,
+  publicMetrics: { ...DEFAULT_PUBLIC_METRICS_PARAMS },
+  variantId: 'default',
+  surfacePolicies: { ...DEFAULT_SURFACE_POLICIES },
   diversityCapN: 20,
   diversityCapK: 5,
   explorationBudget: 0.15,
   rerankMaxCandidates: 200,
+  rerankMinCandidatesPerCluster: 1,
   weights: { prs: 0.55, cvs: 0.25, dns: 0.20 }
 }
 // ============================================================
@@ -61,8 +109,8 @@ export const DEFAULT_PARAMS: AlgorithmParams = {
 export interface UserStateSnapshot {
   /** ユーザーキー（匿名化ID） */
   userKey: string
-  /** 24時間内のいいね回数 */
-  likeWindowCount24h: number
+  /** likeWindowMs 内のいいね回数 */
+  likeWindowCount: number
   /** 30秒内のいいね回数 */
   recentLikeCount30s: number
   /** 直近のクラスタ露出カウント */
@@ -126,8 +174,10 @@ export interface CVSComponents {
 }
 
 export interface QualityFlags {
-  /** モデレーション済み */
+  /** 表示面のモデレーションを通過済み */
   moderated: boolean
+  /** 強制非表示 */
+  hardBlock?: boolean
   /** スパム疑い */
   spamSuspect: boolean
 }
@@ -167,11 +217,11 @@ export interface MetricsInput {
   weightedViews: number
   /** 不正排除済みユニーク閲覧数 */
   qualifiedUniqueViews: number
-  /** 支持者のクラスタ分布（重み） */
+  /** 支持者のクラスタ分布（重み、集計窓はpublicMetrics.metricsWindowDaysに準拠） */
   clusterWeights: Record<string, number>
   /** 最初の反応からの日数 */
   daysSinceFirstReaction: number
-  /** 直近7日の反応残存率 */
+  /** 直近7日の反応残存率（アプリ側で窓を揃える） */
   recentReactionRate: number
 }
 // ============================================================
@@ -198,7 +248,7 @@ export interface RankRequest {
 
 export interface RankContext {
   /** 表示面 */
-  surface: 'home_mix' | 'home_diverse' | 'following' | 'scenes' | 'search' | 'work_page'
+  surface: SurfaceId
   /** 現在時刻 */
   nowTs: number
 }
@@ -211,6 +261,8 @@ export interface RankResponse {
   algorithmId: string
   /** アルゴリズムバージョン */
   algorithmVersion: string
+  /** パラメータセットID（監査/計測用） */
+  paramSetId?: string
   /** ランキング結果 */
   ranked: RankedItem[]
   /** 制約レポート */
@@ -224,6 +276,8 @@ export interface RankedItem {
   finalScore: number
   /** 理由コード */
   reasonCodes: ReasonCode[]
+  /** Surface reason codes (optional) */
+  surfaceReasonCodes?: SurfaceReasonCode[]
   /** スコア内訳（デバッグ用） */
   scoreBreakdown: ScoreBreakdown
 }
@@ -257,7 +311,8 @@ export type ReasonCode =
   | 'HIGH_SUPPORT_DENSITY'
   | 'TRENDING_IN_CLUSTER'
   | 'NEW_IN_CLUSTER'
-  | 'EDITORIAL'
+
+export type SurfaceReasonCode = 'EDITORIAL'
 
 /** 理由コードの説明テンプレート */
 export const REASON_DESCRIPTIONS: Record<ReasonCode, string> = {
@@ -271,19 +326,41 @@ export const REASON_DESCRIPTIONS: Record<ReasonCode, string> = {
   HIGH_SUPPORT_DENSITY: '支持密度が高い',
   TRENDING_IN_CLUSTER: 'シーン内で注目',
   NEW_IN_CLUSTER: 'シーンの新着',
+}
+
+export const SURFACE_REASON_DESCRIPTIONS: Record<SurfaceReasonCode, string> = {
   EDITORIAL: '編集枠'
 }
+
 
 // ============================================================
 // Like Decay Types
 // ============================================================
 
+/** いいね重み入力 */
+export interface LikeWeightInput {
+  /** likeWindowMs 内のいいね回数 */
+  likeWindowCount: number
+  /** 逓減係数α */
+  alpha?: number
+  /** 30秒内のいいね回数 */
+  recentLikeCount30s?: number
+  /** 連打判定閾値（30秒内の回数） */
+  rapidPenaltyThreshold?: number
+  /** 連打ペナルティ乗数 */
+  rapidPenaltyMultiplier?: number
+}
+
 /** いいね重み計算結果 */
 export interface LikeWeight {
-  /** 重み値（0.0〜1.0） */
+  /** 重み値（0.0～1.0） */
   weight: number
-  /** 支持力メーター表示用（0〜100%） */
+  /** 支持力メーター表示用（0～100%） */
   supportPowerPercent: number
+  /** 連打判定 */
+  isRapid: boolean
+  /** 連打ペナルティが適用されたか */
+  rapidPenaltyApplied: boolean
 }
 
 
