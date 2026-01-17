@@ -187,17 +187,15 @@ Combines CR and CP earned (90d):
 ```
 CR_m = getCRMultiplier(CR)
 
-CP_m = min(1.2, max(0.8, 0.8 + 0.2 × log₁₀(1 + CP_90d / 50)))
+CP_m = clamp(1.0, 1.2, 1.0 + 0.2 × log₁₀(1 + CP_90d / 50))
 
-view_weight = CR_m × CP_m
+view_weight = clamp(0.2, 2.0, CR_m × CP_m)
 ```
 
-Clamped to [0.2, 2.0].
-
 **Examples**:
-- CR=1.0, CP=0: `w = 1.25 × 0.8 = 1.0`
-- CR=2.0, CP=100: `w = 1.5 × 1.02 = 1.53`
-- CR=5.0, CP=500: `w = 1.87 × 1.2 = 2.0` (capped)
+- CR=1.0, CP=0: `CP_m = 1.0, w = 1.25 × 1.0 = 1.25`
+- CR=2.0, CP=100: `CP_m ≈ 1.07, w = 1.5 × 1.07 = 1.605`
+- CR=5.0, CP=500: `CP_m = 1.2, w = clamp(0.2, 2.0, 1.87 × 1.2) = 2.0` (capped)
 
 **Purpose**: Engaged curators' views count more toward visibility.
 
@@ -254,18 +252,26 @@ WSR_clamped = min(1.0, WSI)
 
 ### Breadth (Effective Cluster Count)
 
-Uses inverse Simpson index:
+Uses Shannon entropy to calculate effective cluster count:
 
 ```
-breadth = (Σ w_c)² / Σ(w_c²)
+H = -Σ p_i × log(p_i)   (Shannon entropy)
+breadth = e^H            (Effective cluster count)
 ```
 
-Where `w_c` is the weighted like sum from cluster c.
+Where:
+- `p_i` is the proportion of support from cluster i (after normalizing)
+- Clusters aggregated: top 49 kept, remaining summed into "__other__"
 
 **Interpretation**:
-- Breadth ≈ 1: All support from one cluster
-- Breadth ≈ 5: Support evenly spread across ~5 clusters
+- Breadth ≈ 1: All support from one cluster (H ≈ 0)
+- Breadth ≈ 5: Support evenly spread across ~5 clusters (H ≈ ln(5) ≈ 1.6)
 - Breadth > 10: Broad cross-cluster appeal
+
+**Levels** (algorithm.md specification):
+- `low`: breadth < 3
+- `medium`: 3 ≤ breadth < 5
+- `high`: breadth ≥ 5
 
 ### Persistence (Days)
 

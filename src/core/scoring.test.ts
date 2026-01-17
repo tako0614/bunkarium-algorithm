@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { calculateDNS, calculatePenalty } from './scoring'
+import { calculateCVS, calculateDNS, calculatePenalty, calculateMixedScore, DEFAULT_CVS_WEIGHTS } from './scoring'
 import type { Candidate } from '../types'
 
 const baseCandidate: Candidate = {
@@ -24,6 +24,156 @@ const baseCandidate: Candidate = {
 }
 
 describe('scoring', () => {
+  describe('calculateCVS', () => {
+    test('calculates CVS with default weights', () => {
+      const components = {
+        like: 0.8,
+        context: 0.6,
+        collection: 0.4,
+        bridge: 0.2,
+        sustain: 0.3
+      }
+
+      const cvs = calculateCVS(components)
+
+      // Expected: 0.40*0.8 + 0.25*0.6 + 0.20*0.4 + 0.10*0.2 + 0.05*0.3
+      //         = 0.32 + 0.15 + 0.08 + 0.02 + 0.015 = 0.585
+      expect(cvs).toBeCloseTo(0.585, 3)
+    })
+
+    test('clamps CVS to [0, 1]', () => {
+      const highComponents = {
+        like: 2.0,
+        context: 2.0,
+        collection: 2.0,
+        bridge: 2.0,
+        sustain: 2.0
+      }
+
+      const cvs = calculateCVS(highComponents)
+      expect(cvs).toBe(1.0)
+    })
+
+    test('handles zero components', () => {
+      const zeroComponents = {
+        like: 0,
+        context: 0,
+        collection: 0,
+        bridge: 0,
+        sustain: 0
+      }
+
+      const cvs = calculateCVS(zeroComponents)
+      expect(cvs).toBe(0)
+    })
+
+    test('uses custom weights when provided', () => {
+      const components = {
+        like: 1.0,
+        context: 0,
+        collection: 0,
+        bridge: 0,
+        sustain: 0
+      }
+
+      const customWeights = {
+        like: 1.0,
+        context: 0,
+        collection: 0,
+        bridge: 0,
+        sustain: 0
+      }
+
+      const cvs = calculateCVS(components, customWeights)
+      expect(cvs).toBe(1.0)
+    })
+
+    test('DEFAULT_CVS_WEIGHTS sum to 1.0', () => {
+      const sum = Object.values(DEFAULT_CVS_WEIGHTS).reduce((a, b) => a + b, 0)
+      expect(sum).toBeCloseTo(1.0, 6)
+    })
+  })
+
+  describe('calculateMixedScore', () => {
+    test('combines PRS, CVS, DNS with default weights', () => {
+      const candidate: Candidate = {
+        ...baseCandidate,
+        features: {
+          ...baseCandidate.features,
+          prs: 0.8,
+          cvsComponents: {
+            like: 0.6,
+            context: 0.4,
+            collection: 0.3,
+            bridge: 0.2,
+            sustain: 0.1
+          }
+        },
+        createdAt: Date.now() - 24 * 60 * 60 * 1000 // 1 day ago
+      }
+
+      const result = calculateMixedScore(candidate, {}, Date.now())
+
+      expect(result.breakdown.prs).toBe(0.8)
+      expect(result.breakdown.cvs).toBeGreaterThan(0)
+      expect(result.breakdown.dns).toBeGreaterThan(0)
+      expect(result.breakdown.penalty).toBe(0)
+
+      // finalScore = 0.55*PRS + 0.25*CVS + 0.20*DNS - penalty
+      const expected = 0.55 * result.breakdown.prs + 0.25 * result.breakdown.cvs + 0.20 * result.breakdown.dns - result.breakdown.penalty
+      expect(result.finalScore).toBeCloseTo(expected, 9)
+    })
+
+    test('subtracts penalty from final score', () => {
+      const candidate: Candidate = {
+        ...baseCandidate,
+        qualityFlags: {
+          moderated: true,
+          spamSuspect: true
+        },
+        features: {
+          ...baseCandidate.features,
+          prs: 1.0,
+          cvsComponents: {
+            like: 1.0,
+            context: 1.0,
+            collection: 1.0,
+            bridge: 1.0,
+            sustain: 1.0
+          }
+        }
+      }
+
+      const result = calculateMixedScore(candidate, {}, Date.now())
+
+      expect(result.breakdown.penalty).toBe(0.5)
+      expect(result.finalScore).toBeLessThan(result.breakdown.prs) // Penalty reduces score
+    })
+
+    test('rounds finalScore to 9 decimals', () => {
+      const candidate: Candidate = {
+        ...baseCandidate,
+        features: {
+          ...baseCandidate.features,
+          prs: 0.123456789123,
+          cvsComponents: {
+            like: 0.1,
+            context: 0.1,
+            collection: 0.1,
+            bridge: 0.1,
+            sustain: 0.1
+          }
+        }
+      }
+
+      const result = calculateMixedScore(candidate, {}, Date.now())
+
+      const scoreStr = result.finalScore.toString()
+      const decimalPlaces = scoreStr.includes('.') ? scoreStr.split('.')[1].length : 0
+      expect(decimalPlaces).toBeLessThanOrEqual(9)
+    })
+  })
+
   test('calculateDNS - clamps future timestamps to zero age', () => {
     const now = Date.now()
     const candidate: Candidate = {
