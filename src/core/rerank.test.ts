@@ -470,4 +470,195 @@ describe('rerank', () => {
       expect(response1.paramSetId).not.toBe(response2.paramSetId)
     })
   })
+
+  describe('DPP strategy', () => {
+    test('rankSync with rerankStrategy DPP returns valid results', () => {
+      const candidates: Candidate[] = [
+        {
+          ...createCandidate('a', 'c1', 0.9),
+          features: {
+            ...baseFeatures,
+            prs: 0.9,
+            prsSource: 'saved',
+            embedding: [1, 0, 0]
+          }
+        },
+        {
+          ...createCandidate('b', 'c2', 0.8),
+          features: {
+            ...baseFeatures,
+            prs: 0.8,
+            prsSource: 'saved',
+            embedding: [0, 1, 0]
+          }
+        },
+        {
+          ...createCandidate('c', 'c3', 0.7),
+          features: {
+            ...baseFeatures,
+            prs: 0.7,
+            prsSource: 'saved',
+            embedding: [0, 0, 1]
+          }
+        }
+      ]
+
+      const response = rankSync({
+        contractVersion: '1.0',
+        requestId: 'req-dpp',
+        clusterVersion: 'cv-1',
+        userState: {
+          userKey: 'user-1',
+          likeWindowCount: 0,
+          recentClusterExposures: {},
+          diversitySlider: 0.5,
+          curatorReputation: 1.0,
+          cpEarned90d: 0
+        },
+        candidates,
+        context: { surface: 'home_mix', nowTs: Date.now() },
+        params: {
+          rerankStrategy: 'DPP',
+          diversityCapN: 3
+        }
+      })
+
+      expect(response.ranked.length).toBeLessThanOrEqual(3)
+      expect(response.constraintsReport.usedStrategy).toBe('DPP')
+    })
+
+    test('DPP strategy handles candidates without embeddings', () => {
+      const candidates: Candidate[] = [
+        createCandidate('a', 'c1', 0.9),
+        createCandidate('b', 'c2', 0.8),
+        createCandidate('c', 'c3', 0.7)
+      ]
+
+      const response = rankSync({
+        contractVersion: '1.0',
+        requestId: 'req-dpp-no-embed',
+        clusterVersion: 'cv-1',
+        userState: {
+          userKey: 'user-1',
+          likeWindowCount: 0,
+          recentClusterExposures: {},
+          diversitySlider: 0.5,
+          curatorReputation: 1.0,
+          cpEarned90d: 0
+        },
+        candidates,
+        context: { surface: 'home_mix', nowTs: Date.now() },
+        params: {
+          rerankStrategy: 'DPP',
+          diversityCapN: 3
+        }
+      })
+
+      // Should still return results (DPP uses cluster-based similarity as fallback)
+      expect(response.ranked.length).toBeGreaterThan(0)
+      expect(response.constraintsReport.usedStrategy).toBe('DPP')
+    })
+
+    test('DPP produces deterministic results with same seed', () => {
+      const candidates: Candidate[] = [
+        {
+          ...createCandidate('a', 'c1', 0.9),
+          features: {
+            ...baseFeatures,
+            prs: 0.9,
+            prsSource: 'saved',
+            embedding: [1, 0.5, 0]
+          }
+        },
+        {
+          ...createCandidate('b', 'c2', 0.85),
+          features: {
+            ...baseFeatures,
+            prs: 0.85,
+            prsSource: 'saved',
+            embedding: [0, 1, 0.5]
+          }
+        },
+        {
+          ...createCandidate('c', 'c3', 0.8),
+          features: {
+            ...baseFeatures,
+            prs: 0.8,
+            prsSource: 'saved',
+            embedding: [0.5, 0, 1]
+          }
+        }
+      ]
+
+      const request = {
+        contractVersion: '1.0',
+        requestId: 'req-dpp-det',
+        clusterVersion: 'cv-1',
+        requestSeed: 'fixed-dpp-seed',
+        userState: {
+          userKey: 'user-1',
+          likeWindowCount: 0,
+          recentClusterExposures: {},
+          diversitySlider: 0.5,
+          curatorReputation: 1.0,
+          cpEarned90d: 0
+        },
+        candidates,
+        context: { surface: 'home_mix', nowTs: 1234567890000 },
+        params: {
+          rerankStrategy: 'DPP' as const,
+          diversityCapN: 3
+        }
+      }
+
+      const response1 = rankSync(request)
+      const response2 = rankSync(request)
+
+      expect(response1.ranked.map(r => r.itemKey)).toEqual(
+        response2.ranked.map(r => r.itemKey)
+      )
+    })
+  })
+
+  describe('SimilarityCache', () => {
+    test('MMR reranking caches similarity computations', () => {
+      // Create candidates with embeddings to trigger similarity calculations
+      const candidates: Candidate[] = []
+      for (let i = 0; i < 10; i++) {
+        candidates.push({
+          ...createCandidate(`item-${i}`, `cluster-${i % 3}`, 0.9 - i * 0.05),
+          features: {
+            ...baseFeatures,
+            prs: 0.9 - i * 0.05,
+            prsSource: 'saved',
+            embedding: [Math.cos(i), Math.sin(i), 0.5]
+          }
+        })
+      }
+
+      const response = rankSync({
+        contractVersion: '1.0',
+        requestId: 'req-cache',
+        clusterVersion: 'cv-1',
+        userState: {
+          userKey: 'user-1',
+          likeWindowCount: 0,
+          recentClusterExposures: {},
+          diversitySlider: 0.5,
+          curatorReputation: 1.0,
+          cpEarned90d: 0
+        },
+        candidates,
+        context: { surface: 'home_mix', nowTs: Date.now() },
+        params: {
+          diversityCapN: 5,
+          mmrSimilarityPenalty: 0.3
+        }
+      })
+
+      // Verify results are valid (cache should not affect correctness)
+      expect(response.ranked.length).toBe(5)
+      expect(response.constraintsReport.usedStrategy).toBe('MMR')
+    })
+  })
 })

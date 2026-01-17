@@ -224,7 +224,7 @@ bun run typecheck
 bun run build
 ```
 
-All tests: **515 pass, 0 fail** (includes conformance, precision, and comprehensive coverage)
+All tests: **519 pass, 0 fail** (includes conformance, precision, and comprehensive coverage)
 
 ---
 
