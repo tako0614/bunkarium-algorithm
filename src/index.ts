@@ -11,7 +11,6 @@ export * from './types'
 export {
   // Like decay
   calculateLikeWeight,
-  calculateLikeWeightWithRapidPenalty,
   predictNextLikeWeight,
   calculateWeightedLikeSignal,
 

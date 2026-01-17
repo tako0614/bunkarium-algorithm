@@ -1,48 +1,31 @@
-import type { LikeWeight } from '../types'
+import type { LikeWeight, LikeWeightInput } from '../types'
+import { DEFAULT_PARAMS } from '../types'
+import { getCRMultiplier } from './reputation'
 
 /**
  * Like decay weight.
  * w(n) = 1 / (1 + alpha * (n - 1))
  */
-export function calculateLikeWeight(
-  likeCount: number,
-  alpha: number = 0.05
-): LikeWeight {
-  const n = Math.max(1, likeCount)
-  const weight = 1 / (1 + alpha * (n - 1))
-  const supportPowerPercent = Math.round(weight * 100)
+export function calculateLikeWeight(input: LikeWeightInput): LikeWeight {
+  const n = Math.max(1, input.likeWindowCount)
+  const alpha = input.alpha ?? DEFAULT_PARAMS.likeDecayAlpha
+  const baseWeight = 1 / (1 + alpha * (n - 1))
+
+  const recentLikeCount30s = input.recentLikeCount30s ?? 0
+  const rapidThreshold = input.rapidPenaltyThreshold ?? DEFAULT_PARAMS.rapidPenaltyThreshold
+  const rapidPenaltyMultiplier =
+    input.rapidPenaltyMultiplier ?? DEFAULT_PARAMS.rapidPenaltyMultiplier
+
+  const isRapid = recentLikeCount30s >= rapidThreshold
+  const rapidPenaltyApplied = isRapid && rapidPenaltyMultiplier < 1
+  const finalWeight = isRapid ? baseWeight * rapidPenaltyMultiplier : baseWeight
+  const supportPowerPercent = Math.round(finalWeight * 100)
 
   return {
-    weight,
-    supportPowerPercent
-  }
-}
-
-/**
- * Like decay with rapid-activity penalty.
- */
-export function calculateLikeWeightWithRapidPenalty(
-  likeCount: number,
-  recentLikeCount: number,
-  alpha: number = 0.05,
-  rapidThreshold: number = 50,
-  rapidPenaltyMultiplier: number = 0.1
-): LikeWeight & { isRapid: boolean } {
-  const baseWeight = calculateLikeWeight(likeCount, alpha)
-  const isRapid = recentLikeCount >= rapidThreshold
-
-  if (isRapid) {
-    const penalizedWeight = baseWeight.weight * rapidPenaltyMultiplier
-    return {
-      weight: penalizedWeight,
-      supportPowerPercent: Math.round(penalizedWeight * 100),
-      isRapid: true
-    }
-  }
-
-  return {
-    ...baseWeight,
-    isRapid: false
+    weight: finalWeight,
+    supportPowerPercent,
+    isRapid,
+    rapidPenaltyApplied
   }
 }
 
@@ -51,9 +34,12 @@ export function calculateLikeWeightWithRapidPenalty(
  */
 export function predictNextLikeWeight(
   currentLikeCount: number,
-  alpha: number = 0.05
+  alpha: number = DEFAULT_PARAMS.likeDecayAlpha
 ): LikeWeight {
-  return calculateLikeWeight(currentLikeCount + 1, alpha)
+  return calculateLikeWeight({
+    likeWindowCount: currentLikeCount + 1,
+    alpha
+  })
 }
 
 /**
@@ -65,6 +51,7 @@ export function calculateWeightedLikeSignal(
 ): number {
   return likes.reduce((sum, like) => {
     const timeDecay = Math.pow(0.5, like.ageHours / timeDecayHalfLifeHours)
-    return sum + like.weight * like.curatorReputation * timeDecay
+    const crMultiplier = getCRMultiplier(like.curatorReputation)
+    return sum + like.weight * crMultiplier * timeDecay
   }, 0)
 }

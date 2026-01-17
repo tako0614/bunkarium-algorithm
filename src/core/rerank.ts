@@ -7,7 +7,7 @@ import type {
   RankRequest,
   RankResponse
 } from '../types'
-import { DEFAULT_PARAMS } from '../types'
+import { DEFAULT_PARAMS, DEFAULT_SURFACE_POLICIES } from '../types'
 import { ALGORITHM_ID, ALGORITHM_VERSION } from '../constants'
 import { calculateMixedScore } from './scoring'
 import { determineReasonCodes } from './explain'
@@ -21,6 +21,8 @@ interface RerankOptions {
   diversityCapK: number
   /** Exploration budget (0.0-1.0). */
   explorationBudget: number
+  /** Deterministic seed for exploration sampling. */
+  requestSeed?: string
 }
 
 const DEFAULT_RERANK_OPTIONS: RerankOptions = {
@@ -30,6 +32,15 @@ const DEFAULT_RERANK_OPTIONS: RerankOptions = {
 }
 
 const SIMILARITY_PENALTY_WEIGHT = 0.3
+
+function hashString(input: string): number {
+  let hash = 2166136261
+  for (let i = 0; i < input.length; i++) {
+    hash ^= input.charCodeAt(i)
+    hash = Math.imul(hash, 16777619)
+  }
+  return hash >>> 0
+}
 
 function calculateSimilarityPenalty(candidate: Candidate, selectedItems: Candidate[]): number {
   if (!candidate.features.embedding || selectedItems.length === 0) return 0
@@ -72,6 +83,48 @@ function applySimilarityPenalty(
   }
 }
 
+function buildRerankCandidatePool(
+  scoredCandidates: Array<Candidate & { score: ReturnType<typeof calculateMixedScore> }>,
+  minPerCluster: number,
+  maxCandidates: number
+): Array<Candidate & { score: ReturnType<typeof calculateMixedScore> }> {
+  if (minPerCluster <= 0 || maxCandidates <= 0) {
+    return scoredCandidates.slice(0, Math.max(1, maxCandidates))
+  }
+
+  const buckets = new Map<string, Array<Candidate & { score: ReturnType<typeof calculateMixedScore> }>>()
+  for (const candidate of scoredCandidates) {
+    const bucket = buckets.get(candidate.clusterId) ?? []
+    bucket.push(candidate)
+    buckets.set(candidate.clusterId, bucket)
+  }
+
+  const selected: Array<Candidate & { score: ReturnType<typeof calculateMixedScore> }> = []
+  const clusterIds = Array.from(buckets.keys())
+
+  for (let round = 0; round < minPerCluster; round++) {
+    for (const clusterId of clusterIds) {
+      const bucket = buckets.get(clusterId)
+      if (!bucket || bucket.length === 0) continue
+      const candidate = bucket.shift()
+      if (!candidate) continue
+      selected.push(candidate)
+      if (selected.length >= maxCandidates) {
+        return selected
+      }
+    }
+  }
+
+  const selectedIds = new Set(selected.map(candidate => candidate.itemKey))
+  for (const candidate of scoredCandidates) {
+    if (selectedIds.has(candidate.itemKey)) continue
+    selected.push(candidate)
+    if (selected.length >= maxCandidates) break
+  }
+
+  return selected
+}
+
 /**
  * Primary ranking pass.
  */
@@ -81,7 +134,10 @@ export function primaryRank(
   nowTs: number,
   weights: { prs: number; cvs: number; dns: number }
 ): Array<Candidate & { score: ReturnType<typeof calculateMixedScore> }> {
-  const scored = candidates.map(candidate => ({
+  const filteredCandidates = candidates.filter(
+    candidate => !candidate.features.qualityFlags.hardBlock
+  )
+  const scored = filteredCandidates.map(candidate => ({
     ...candidate,
     score: calculateMixedScore(
       candidate,
@@ -112,7 +168,7 @@ export function diversityRerank(
   recentClusterExposures: Record<string, number>,
   options: RerankOptions = DEFAULT_RERANK_OPTIONS
 ): { reranked: Array<Candidate & { score: ReturnType<typeof calculateMixedScore>; reasonCodes: ReasonCode[] }>; report: ConstraintsReport } {
-  const { diversityCapN, diversityCapK, explorationBudget } = options
+  const { diversityCapN, diversityCapK, explorationBudget, requestSeed } = options
 
   const result: Array<Candidate & { score: ReturnType<typeof calculateMixedScore>; reasonCodes: ReasonCode[] }> = []
   const remaining = [...scoredCandidates]
@@ -129,9 +185,18 @@ export function diversityRerank(
     ? Math.max(1, Math.floor(diversityCapN / (explorationSlotCount + 1)))
     : 0
 
-  const explorationCandidates = remaining
+  const explorationPool = remaining
     .filter(c => (clusterCounts[c.clusterId] || 0) === 0)
-    .slice(0, explorationSlotCount)
+
+  const explorationCandidates = requestSeed
+    ? [...explorationPool]
+      .sort((a, b) => {
+        const aHash = hashString(`${requestSeed}:${a.itemKey}`)
+        const bHash = hashString(`${requestSeed}:${b.itemKey}`)
+        return aHash - bHash
+      })
+      .slice(0, explorationSlotCount)
+    : explorationPool.slice(0, explorationSlotCount)
 
   while (result.length < diversityCapN && remaining.length > 0) {
     const shouldInsertExploration =
@@ -233,31 +298,56 @@ export function rank(request: RankRequest): RankResponse {
     ...DEFAULT_PARAMS.weights,
     ...(params.weights ?? {})
   }
+  const publicMetrics = {
+    ...DEFAULT_PARAMS.publicMetrics,
+    ...(params.publicMetrics ?? {})
+  }
+  const surfacePolicies = {
+    ...DEFAULT_SURFACE_POLICIES,
+    ...(params.surfacePolicies ?? {})
+  }
 
   const fullParams: AlgorithmParams = {
     ...DEFAULT_PARAMS,
     ...params,
-    weights
+    weights,
+    publicMetrics,
+    surfacePolicies
   }
 
-  const maxCandidates = Math.max(1, fullParams.rerankMaxCandidates)
-  const diversityCapN = Math.max(1, Math.min(fullParams.diversityCapN, maxCandidates))
+  const surfacePolicy = {
+    ...DEFAULT_SURFACE_POLICIES[request.context.surface],
+    ...(fullParams.surfacePolicies?.[request.context.surface] ?? {})
+  }
+  const filteredCandidates = surfacePolicy.requireModerated
+    ? request.candidates.filter(candidate => candidate.features.qualityFlags.moderated)
+    : request.candidates
 
   const primaryRanked = primaryRank(
-    request.candidates,
+    filteredCandidates,
     request.userState.recentClusterExposures,
     request.context.nowTs,
     fullParams.weights
   )
 
-  const rerankInput = primaryRanked.slice(0, maxCandidates)
+  const clusterCount = new Set(primaryRanked.map(candidate => candidate.clusterId)).size
+  const minPerCluster = Math.max(0, fullParams.rerankMinCandidatesPerCluster)
+  const minCandidates = minPerCluster > 0 ? clusterCount * minPerCluster : 0
+  const maxCandidates = Math.max(
+    1,
+    Math.min(primaryRanked.length, Math.max(fullParams.rerankMaxCandidates, minCandidates))
+  )
+  const diversityCapN = Math.max(1, Math.min(fullParams.diversityCapN, maxCandidates))
+
+  const rerankInput = buildRerankCandidatePool(primaryRanked, minPerCluster, maxCandidates)
   const { reranked, report } = diversityRerank(
     rerankInput,
     request.userState.recentClusterExposures,
     {
       diversityCapN,
       diversityCapK: fullParams.diversityCapK,
-      explorationBudget: fullParams.explorationBudget
+      explorationBudget: fullParams.explorationBudget,
+      requestSeed: request.requestSeed ?? request.requestId
     }
   )
 
@@ -272,6 +362,7 @@ export function rank(request: RankRequest): RankResponse {
     requestId: request.requestId,
     algorithmId: ALGORITHM_ID,
     algorithmVersion: ALGORITHM_VERSION,
+    paramSetId: fullParams.variantId,
     ranked,
     constraintsReport: report
   }
