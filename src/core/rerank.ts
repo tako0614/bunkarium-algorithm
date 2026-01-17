@@ -546,7 +546,7 @@ function diversityRerankDPP(
 
   // DiversityItem形式に変換
   const diversityItems: DiversityItem[] = scoredCandidates.slice(0, Math.min(100, scoredCandidates.length)).map(c => ({
-    id: c.itemKey,
+    itemKey: c.itemKey,
     score: c.score.finalScore,
     clusterId: c.clusterId,
     embedding: c.features.embedding
@@ -554,7 +554,7 @@ function diversityRerankDPP(
 
   // DPPサンプリング実行
   const { selected } = dppSampleGreedy(diversityItems, N)
-  const selectedIds = new Set(selected.map(item => item.id))
+  const selectedIds = new Set(selected.map(item => item.itemKey))
 
   // 選択された候補を順序付けて返す
   const result: Array<ScoredCandidate & { reasonCodes: ReasonCode[] }> = []
@@ -562,7 +562,7 @@ function diversityRerankDPP(
   let capAppliedCount = 0
 
   for (const item of selected) {
-    const candidate = scoredCandidates.find(c => c.itemKey === item.id)
+    const candidate = scoredCandidates.find(c => c.itemKey === item.itemKey)
     if (!candidate) continue
 
     // cluster cap チェック
