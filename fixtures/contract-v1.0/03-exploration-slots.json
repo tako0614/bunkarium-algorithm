@@ -1,0 +1,177 @@
+{
+  "testId": "03-exploration-slots",
+  "description": "Verify deterministic exploration slot positions with seed (15% exploration = 3 slots in top 20)",
+  "input": {
+    "request": {
+      "contractVersion": "1.0",
+      "requestId": "test-03",
+      "requestSeed": "deterministic-seed-12345",
+      "clusterVersion": "v1-test",
+      "userState": {
+        "userKey": "user-test-03",
+        "likeWindowCount": 8,
+        "recentClusterExposures": {
+          "cluster-known": 10
+        },
+        "diversitySlider": 0.5,
+        "curatorReputation": 1,
+        "cpEarned90d": 0
+      },
+      "candidates": [
+        {
+          "itemKey": "item-high-1",
+          "type": "work",
+          "clusterId": "cluster-known",
+          "createdAt": 1704067200000,
+          "qualityFlags": {
+            "moderated": true
+          },
+          "features": {
+            "prs": 0.9,
+            "cvsComponents": {
+              "like": 0.8,
+              "context": 0.7,
+              "collection": 0.6,
+              "bridge": 0.5,
+              "sustain": 0.4
+            }
+          }
+        },
+        {
+          "itemKey": "item-high-2",
+          "type": "work",
+          "clusterId": "cluster-known",
+          "createdAt": 1704153600000,
+          "qualityFlags": {
+            "moderated": true
+          },
+          "features": {
+            "prs": 0.85,
+            "cvsComponents": {
+              "like": 0.75,
+              "context": 0.65,
+              "collection": 0.55,
+              "bridge": 0.45,
+              "sustain": 0.35
+            }
+          }
+        },
+        {
+          "itemKey": "item-explore-1",
+          "type": "work",
+          "clusterId": "cluster-new",
+          "createdAt": 1704499000000,
+          "qualityFlags": {
+            "moderated": true
+          },
+          "features": {
+            "prs": 0.4,
+            "cvsComponents": {
+              "like": 0.5,
+              "context": 0.4,
+              "collection": 0.3,
+              "bridge": 0.2,
+              "sustain": 0.1
+            }
+          }
+        },
+        {
+          "itemKey": "item-explore-2",
+          "type": "work",
+          "clusterId": "cluster-new",
+          "createdAt": 1704498900000,
+          "qualityFlags": {
+            "moderated": true
+          },
+          "features": {
+            "prs": 0.35,
+            "cvsComponents": {
+              "like": 0.45,
+              "context": 0.35,
+              "collection": 0.25,
+              "bridge": 0.15,
+              "sustain": 0.05
+            }
+          }
+        },
+        {
+          "itemKey": "item-explore-3",
+          "type": "work",
+          "clusterId": "cluster-new",
+          "createdAt": 1704498800000,
+          "qualityFlags": {
+            "moderated": true
+          },
+          "features": {
+            "prs": 0.3,
+            "cvsComponents": {
+              "like": 0.4,
+              "context": 0.3,
+              "collection": 0.2,
+              "bridge": 0.1,
+              "sustain": 0.05
+            }
+          }
+        }
+      ],
+      "context": {
+        "surface": "home_mix",
+        "nowTs": 1704499200000
+      },
+      "params": {
+        "explorationBudget": 0.15,
+        "diversityCapN": 20
+      }
+    }
+  },
+  "expected": {
+    "ranked": [
+      {
+        "itemKey": "item-high-1",
+        "finalScore": 0.766448421,
+        "reasonCodes": [
+          "GROWING_CONTEXT"
+        ]
+      },
+      {
+        "itemKey": "item-high-2",
+        "finalScore": 0.732998021,
+        "reasonCodes": [
+          "TRENDING_IN_CLUSTER"
+        ]
+      },
+      {
+        "itemKey": "item-explore-1",
+        "finalScore": 0.516207225,
+        "reasonCodes": [
+          "NEW_IN_CLUSTER"
+        ]
+      },
+      {
+        "itemKey": "item-explore-2",
+        "finalScore": 0.476185845,
+        "reasonCodes": [
+          "NEW_IN_CLUSTER"
+        ]
+      },
+      {
+        "itemKey": "item-explore-3",
+        "finalScore": 0.436789472,
+        "reasonCodes": [
+          "NEW_IN_CLUSTER"
+        ]
+      }
+    ],
+    "paramSetId": "7bc3aac920e62e26c3154d2fa5ae8d1c0ebec5026e4a05e18290ff568c4b328a",
+    "constraintsReport": {
+      "usedStrategy": "MMR",
+      "capAppliedCount": 0,
+      "explorationSlotsFilled": 0,
+      "effectiveWeights": {
+        "prs": 0.55,
+        "cvs": 0.25,
+        "dns": 0.2
+      }
+    }
+  }
+}

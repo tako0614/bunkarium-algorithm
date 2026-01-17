@@ -112,14 +112,35 @@ export const DEFAULT_CP_CONFIG: CPIssuanceConfig = {
   }
 }
 
-export function calculateDiminishingMultiplier(
+// Overload signatures to match spec (line 110)
+export function calculateCPDiminishingMultiplier(
+  n: number,
+  rate: number,
+  minMultiplier: number
+): number
+export function calculateCPDiminishingMultiplier(
   recentEventCount: number,
-  config: CPIssuanceConfig = DEFAULT_CP_CONFIG
+  config?: CPIssuanceConfig
+): number
+// Implementation
+export function calculateCPDiminishingMultiplier(
+  n: number,
+  rateOrConfig?: number | CPIssuanceConfig,
+  minMultiplier?: number
 ): number {
-  const { rate, minMultiplier } = config.diminishing
-  const safeCount = Math.max(1, recentEventCount)
+  // Spec-compliant signature: (n: number, rate: number, minMultiplier: number)
+  if (typeof rateOrConfig === 'number' && minMultiplier !== undefined) {
+    const safeCount = Math.max(1, Math.floor(n))
+    const multiplier = 1 / (1 + rateOrConfig * (safeCount - 1))
+    return Math.max(minMultiplier, multiplier)
+  }
+
+  // Backward-compatible signature: (recentEventCount: number, config?: CPIssuanceConfig)
+  const config = (typeof rateOrConfig === 'object' ? rateOrConfig : undefined) ?? DEFAULT_CP_CONFIG
+  const { rate, minMultiplier: min } = config.diminishing
+  const safeCount = Math.max(1, Math.floor(n))
   const multiplier = 1 / (1 + rate * (safeCount - 1))
-  return Math.max(minMultiplier, multiplier)
+  return Math.max(min, multiplier)
 }
 
 export function calculateCPIssuance(
@@ -164,7 +185,7 @@ export function calculateCPIssuance(
       baseAmount = 0
   }
 
-  const diminishingMultiplier = calculateDiminishingMultiplier(recentEventCount, config)
+  const diminishingMultiplier = calculateCPDiminishingMultiplier(recentEventCount, config)
   const safeCrMultiplier = Math.max(0.9, Math.min(1.1, crMultiplier))
   const amount = Math.round(baseAmount * diminishingMultiplier * safeCrMultiplier)
 

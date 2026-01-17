@@ -1,0 +1,305 @@
+{
+  "testId": "02-cluster-cap",
+  "description": "10 candidates in 2 clusters, verify cluster cap enforcement (K=3)",
+  "input": {
+    "request": {
+      "contractVersion": "1.0",
+      "requestId": "test-02",
+      "clusterVersion": "v1-test",
+      "userState": {
+        "userKey": "user-test-02",
+        "likeWindowCount": 5,
+        "recentClusterExposures": {},
+        "diversitySlider": 0.5,
+        "curatorReputation": 1,
+        "cpEarned90d": 0
+      },
+      "candidates": [
+        {
+          "itemKey": "item-a1",
+          "type": "work",
+          "clusterId": "cluster-alpha",
+          "createdAt": 1704067200000,
+          "qualityFlags": {
+            "moderated": true
+          },
+          "features": {
+            "prs": 0.9,
+            "cvsComponents": {
+              "like": 0.8,
+              "context": 0.7,
+              "collection": 0.6,
+              "bridge": 0.5,
+              "sustain": 0.4
+            }
+          }
+        },
+        {
+          "itemKey": "item-a2",
+          "type": "work",
+          "clusterId": "cluster-alpha",
+          "createdAt": 1704153600000,
+          "qualityFlags": {
+            "moderated": true
+          },
+          "features": {
+            "prs": 0.88,
+            "cvsComponents": {
+              "like": 0.75,
+              "context": 0.65,
+              "collection": 0.55,
+              "bridge": 0.45,
+              "sustain": 0.35
+            }
+          }
+        },
+        {
+          "itemKey": "item-a3",
+          "type": "work",
+          "clusterId": "cluster-alpha",
+          "createdAt": 1704240000000,
+          "qualityFlags": {
+            "moderated": true
+          },
+          "features": {
+            "prs": 0.86,
+            "cvsComponents": {
+              "like": 0.7,
+              "context": 0.6,
+              "collection": 0.5,
+              "bridge": 0.4,
+              "sustain": 0.3
+            }
+          }
+        },
+        {
+          "itemKey": "item-a4",
+          "type": "work",
+          "clusterId": "cluster-alpha",
+          "createdAt": 1704326400000,
+          "qualityFlags": {
+            "moderated": true
+          },
+          "features": {
+            "prs": 0.84,
+            "cvsComponents": {
+              "like": 0.65,
+              "context": 0.55,
+              "collection": 0.45,
+              "bridge": 0.35,
+              "sustain": 0.25
+            }
+          }
+        },
+        {
+          "itemKey": "item-a5",
+          "type": "work",
+          "clusterId": "cluster-alpha",
+          "createdAt": 1704412800000,
+          "qualityFlags": {
+            "moderated": true
+          },
+          "features": {
+            "prs": 0.82,
+            "cvsComponents": {
+              "like": 0.6,
+              "context": 0.5,
+              "collection": 0.4,
+              "bridge": 0.3,
+              "sustain": 0.2
+            }
+          }
+        },
+        {
+          "itemKey": "item-b1",
+          "type": "work",
+          "clusterId": "cluster-beta",
+          "createdAt": 1704067200000,
+          "qualityFlags": {
+            "moderated": true
+          },
+          "features": {
+            "prs": 0.7,
+            "cvsComponents": {
+              "like": 0.6,
+              "context": 0.5,
+              "collection": 0.4,
+              "bridge": 0.3,
+              "sustain": 0.2
+            }
+          }
+        },
+        {
+          "itemKey": "item-b2",
+          "type": "work",
+          "clusterId": "cluster-beta",
+          "createdAt": 1704153600000,
+          "qualityFlags": {
+            "moderated": true
+          },
+          "features": {
+            "prs": 0.68,
+            "cvsComponents": {
+              "like": 0.58,
+              "context": 0.48,
+              "collection": 0.38,
+              "bridge": 0.28,
+              "sustain": 0.18
+            }
+          }
+        },
+        {
+          "itemKey": "item-b3",
+          "type": "work",
+          "clusterId": "cluster-beta",
+          "createdAt": 1704240000000,
+          "qualityFlags": {
+            "moderated": true
+          },
+          "features": {
+            "prs": 0.66,
+            "cvsComponents": {
+              "like": 0.56,
+              "context": 0.46,
+              "collection": 0.36,
+              "bridge": 0.26,
+              "sustain": 0.16
+            }
+          }
+        },
+        {
+          "itemKey": "item-b4",
+          "type": "work",
+          "clusterId": "cluster-beta",
+          "createdAt": 1704326400000,
+          "qualityFlags": {
+            "moderated": true
+          },
+          "features": {
+            "prs": 0.64,
+            "cvsComponents": {
+              "like": 0.54,
+              "context": 0.44,
+              "collection": 0.34,
+              "bridge": 0.24,
+              "sustain": 0.14
+            }
+          }
+        },
+        {
+          "itemKey": "item-b5",
+          "type": "work",
+          "clusterId": "cluster-beta",
+          "createdAt": 1704412800000,
+          "qualityFlags": {
+            "moderated": true
+          },
+          "features": {
+            "prs": 0.62,
+            "cvsComponents": {
+              "like": 0.52,
+              "context": 0.42,
+              "collection": 0.32,
+              "bridge": 0.22,
+              "sustain": 0.12
+            }
+          }
+        }
+      ],
+      "context": {
+        "surface": "home_mix",
+        "nowTs": 1704499200000
+      },
+      "params": {
+        "diversityCapK": 3,
+        "explorationBudget": 0
+      }
+    }
+  },
+  "expected": {
+    "ranked": [
+      {
+        "itemKey": "item-a1",
+        "finalScore": 0.811448421,
+        "reasonCodes": [
+          "GROWING_CONTEXT",
+          "NEW_IN_CLUSTER"
+        ]
+      },
+      {
+        "itemKey": "item-b1",
+        "finalScore": 0.651448421,
+        "reasonCodes": [
+          "NEW_IN_CLUSTER"
+        ]
+      },
+      {
+        "itemKey": "item-a2",
+        "finalScore": 0.794498021,
+        "reasonCodes": [
+          "NEW_IN_CLUSTER"
+        ]
+      },
+      {
+        "itemKey": "item-a3",
+        "finalScore": 0.77925,
+        "reasonCodes": [
+          "NEW_IN_CLUSTER"
+        ]
+      },
+      {
+        "itemKey": "item-b2",
+        "finalScore": 0.641998021,
+        "reasonCodes": [
+          "NEW_IN_CLUSTER"
+        ]
+      },
+      {
+        "itemKey": "item-b3",
+        "finalScore": 0.63425,
+        "reasonCodes": [
+          "NEW_IN_CLUSTER"
+        ]
+      },
+      {
+        "itemKey": "item-a4",
+        "finalScore": 0.766146842,
+        "reasonCodes": [
+          "NEW_IN_CLUSTER"
+        ]
+      },
+      {
+        "itemKey": "item-a5",
+        "finalScore": 0.755746042,
+        "reasonCodes": [
+          "NEW_IN_CLUSTER"
+        ]
+      },
+      {
+        "itemKey": "item-b4",
+        "finalScore": 0.628646842,
+        "reasonCodes": [
+          "NEW_IN_CLUSTER"
+        ]
+      },
+      {
+        "itemKey": "item-b5",
+        "finalScore": 0.625746042,
+        "reasonCodes": [
+          "NEW_IN_CLUSTER"
+        ]
+      }
+    ],
+    "paramSetId": "83260b113f6981242b45a4f1e86566ede4e8defe4e1f7db9993b42ae4c12f7ac",
+    "constraintsReport": {
+      "usedStrategy": "MMR",
+      "capAppliedCount": 14,
+      "explorationSlotsFilled": 0,
+      "effectiveWeights": {
+        "prs": 0.55,
+        "cvs": 0.25,
+        "dns": 0.2
+      }
+    }
+  }
+}

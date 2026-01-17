@@ -1,5 +1,7 @@
 // Curator Reputation (CR) helpers.
 
+import type { CRConfig } from '../types'
+
 export interface CREvent {
   type: CREventType
   timestamp: number
@@ -38,7 +40,7 @@ export const DEFAULT_CR_WEIGHTS: CRWeights = {
   qualityContribution: 0.08
 }
 
-export interface CRConfig {
+export interface CRFullConfig {
   baseCR: number
   minCR: number
   maxCR: number
@@ -46,7 +48,7 @@ export interface CRConfig {
   weights: CRWeights
 }
 
-export const DEFAULT_CR_CONFIG: CRConfig = {
+export const DEFAULT_CR_CONFIG: CRFullConfig = {
   baseCR: 1.0,
   minCR: 0.1,
   maxCR: 10.0,
@@ -57,7 +59,7 @@ export const DEFAULT_CR_CONFIG: CRConfig = {
 export function calculateCR(
   events: CREvent[],
   currentCR: number = 1.0,
-  config: CRConfig = DEFAULT_CR_CONFIG
+  config: CRFullConfig = DEFAULT_CR_CONFIG
 ): number {
   const now = Date.now()
 
@@ -91,9 +93,19 @@ function getEventWeight(type: CREventType, weights: CRWeights): number {
   }
 }
 
-export function getCRMultiplier(cr: number): number {
-  const safeCr = Math.max(0.1, cr)
-  return Math.max(0.5, Math.min(2.0, 0.5 + 0.5 * Math.log10(safeCr * 10)))
+export function getCRMultiplier(cr: number, config?: CRConfig): number {
+  const minCR = config?.minCR ?? 0.1
+  const maxCR = config?.maxCR ?? 10.0
+
+  // Clamp CR to valid range
+  const crC = Math.max(minCR, Math.min(maxCR, cr))
+
+  // Logarithmic scaling: x = log10(crC/minCR) / log10(maxCR/minCR)
+  const x = Math.log10(crC / minCR) / Math.log10(maxCR / minCR)
+  const xClamped = Math.max(0, Math.min(1, x))
+
+  // Map to [0.5, 2.0]: CRm = 0.5 + 1.5*x
+  return Math.max(0.5, Math.min(2.0, 0.5 + 1.5 * xClamped))
 }
 
 export function getCRLevel(cr: number): 'newcomer' | 'regular' | 'trusted' | 'expert' {
@@ -181,4 +193,40 @@ export function evaluateNoteSettlement(
     referenceCount: references.length,
     recentActivityRate
   }
+}
+
+/**
+ * Calculate Cultural View Value (CVV) view weight.
+ *
+ * The view weight represents the cultural value of attention from a specific viewer,
+ * based on their reputation (CR) and recent contribution activity (CP earned).
+ *
+ * Formula:
+ * - CRm = getCRMultiplier(curatorReputation) in [0.5, 2.0]
+ * - CPm = clamp(1.0, 1.2, 1.0 + 0.2 × log10(1 + cpEarned90d/50))
+ * - viewWeight = clamp(0.2, 2.0, CRm × CPm)
+ *
+ * @param curatorReputation - The curator's reputation score (CR)
+ * @param cpEarned90d - Culture Points earned in the last 90 days
+ * @param config - Optional CR configuration for getCRMultiplier
+ * @returns View weight in range [0.2, 2.0]
+ */
+export function calculateViewWeight(
+  curatorReputation: number,
+  cpEarned90d: number,
+  config?: CRConfig
+): number {
+  // Get CR multiplier in [0.5, 2.0]
+  const crMultiplier = getCRMultiplier(curatorReputation, config)
+
+  // Calculate CP multiplier
+  // CPm = clamp(1.0, 1.2, 1.0 + 0.2 × log10(1 + cpEarned90d/50))
+  const cpBase = 1.0 + cpEarned90d / 50
+  const cpLog = Math.log10(cpBase)
+  const cpMultiplier = Math.max(1.0, Math.min(1.2, 1.0 + 0.2 * cpLog))
+
+  // Calculate final view weight
+  // viewWeight = clamp(0.2, 2.0, CRm × CPm)
+  const viewWeight = crMultiplier * cpMultiplier
+  return Math.max(0.2, Math.min(2.0, viewWeight))
 }

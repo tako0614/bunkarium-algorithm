@@ -1,63 +1,64 @@
-import type { Candidate, ReasonCode } from '../types'
-import { REASON_DESCRIPTIONS } from '../types'
-import { calculateSupportDensity } from './metrics'
-import { EXPLAIN_THRESHOLDS } from './defaults'
+import type { Candidate, ReasonCode, ExplainThresholds } from '../types'
+import { REASON_DESCRIPTIONS, DEFAULT_EXPLAIN_THRESHOLDS } from '../types'
 
 /**
- * Build reason codes for explain.
+ * 理由コード判定（algorithm.md仕様）
+ *
+ * 優先順位:
+ * 1) GROWING_CONTEXT (context >= contextHigh)
+ * 2) BRIDGE_SUCCESS (bridge >= bridgeHigh)
+ * 3) HIGH_SUPPORT_DENSITY (supportDensity >= supportDensityHigh)
+ * 4) NEW_IN_CLUSTER (exposure <= newClusterExposureMax)
+ * 5) SIMILAR_TO_SAVED / SIMILAR_TO_LIKED / FOLLOWING (prs >= prsSimilarityMin)
+ * 6) TRENDING_IN_CLUSTER (fallback)
+ * 7) DIVERSITY_SLOT / EXPLORATION (added by reranking)
  */
 export function determineReasonCodes(
   candidate: Candidate,
-  clusterCounts: Record<string, number>
+  recentClusterExposures: Record<string, number>,
+  thresholds: ExplainThresholds = DEFAULT_EXPLAIN_THRESHOLDS
 ): ReasonCode[] {
   const codes: ReasonCode[] = []
   const { features } = candidate
-  const thresholds = EXPLAIN_THRESHOLDS
 
-  if (features.cvsComponents.contextSignal >= thresholds.contextSignalThreshold) {
+  // 1) GROWING_CONTEXT
+  if (features.cvsComponents.context >= thresholds.contextHigh) {
     codes.push('GROWING_CONTEXT')
   }
 
-  if (features.cvsComponents.bridgeSignal >= thresholds.bridgeSignalThreshold) {
+  // 2) BRIDGE_SUCCESS
+  if (features.cvsComponents.bridge >= thresholds.bridgeHigh) {
     codes.push('BRIDGE_SUCCESS')
   }
 
-  const derivedSupportDensity =
-    features.publicMetrics?.supportDensity ??
-    (features.qualifiedUniqueViews > 0
-      ? calculateSupportDensity(
-        features.cvsComponents.likeSignal,
-        features.qualifiedUniqueViews
-      )
-      : undefined)
-  if (derivedSupportDensity !== undefined) {
-    if (derivedSupportDensity >= thresholds.supportDensityThreshold) {
-      codes.push('HIGH_SUPPORT_DENSITY')
-    }
-  } else if (features.cvsComponents.likeSignal > 1.0) {
+  // 3) HIGH_SUPPORT_DENSITY
+  const supportDensity = features.publicMetricsHint?.supportDensity
+  if (supportDensity !== undefined && supportDensity >= thresholds.supportDensityHigh) {
     codes.push('HIGH_SUPPORT_DENSITY')
   }
 
-  const clusterExposure = clusterCounts[candidate.clusterId] || 0
-  if (clusterExposure < thresholds.newClusterExposureThreshold) {
+  // 4) NEW_IN_CLUSTER
+  const clusterExposure = recentClusterExposures[candidate.clusterId] ?? 0
+  if (clusterExposure <= thresholds.newClusterExposureMax) {
     codes.push('NEW_IN_CLUSTER')
   }
 
-  if (features.prs && features.prs >= thresholds.prsSimilarityThreshold) {
+  // 5) SIMILAR_TO_* / FOLLOWING
+  if (features.prs !== undefined && features.prs >= thresholds.prsSimilarityMin) {
     switch (features.prsSource) {
+      case 'saved':
+        codes.push('SIMILAR_TO_SAVED')
+        break
       case 'liked':
         codes.push('SIMILAR_TO_LIKED')
         break
       case 'following':
         codes.push('FOLLOWING')
         break
-      case 'saved':
-      default:
-        codes.push('SIMILAR_TO_SAVED')
-        break
     }
   }
 
+  // 6) TRENDING_IN_CLUSTER (fallback)
   if (codes.length === 0) {
     codes.push('TRENDING_IN_CLUSTER')
   }
@@ -77,7 +78,7 @@ export function formatReasonCodes(codes: ReasonCode[]): string[] {
  */
 export function generateDetailedExplanation(
   candidate: Candidate,
-  scoreBreakdown: { prs: number; cvs: number; dns: number; penalty: number },
+  scoreBreakdown: { prs: number; cvs: number; dns: number; penalty: number; finalScore: number },
   reasonCodes: ReasonCode[]
 ): {
   summary: string

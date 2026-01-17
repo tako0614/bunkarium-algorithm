@@ -68,6 +68,20 @@ export interface EvaluationResult {
   }
 }
 
+// Type aliases for spec compliance (algorithm.md line 111)
+export interface OfflineDataset {
+  exposures: ExposureLog[]
+  popularity: ItemPopularity[]
+  totalClusters: number
+}
+
+export interface OfflineEvalConfig {
+  longTailTopPercentile?: number
+  freshDays?: number
+}
+
+export type OfflineEvalReport = EvaluationResult
+
 // ============================================
 // Gini係数の計算
 // ============================================
@@ -538,16 +552,42 @@ export function calculateFairnessDivergence(
  * @param config - 設定
  * @returns 評価結果
  */
-export function evaluate(
+// Spec-compliant overload (algorithm.md line 111)
+export function evaluateOffline(
+  dataset: OfflineDataset,
+  config?: OfflineEvalConfig
+): OfflineEvalReport
+// Backward-compatible signature
+export function evaluateOffline(
   exposures: ExposureLog[],
   popularity: ItemPopularity[],
   totalClusters: number,
-  config: {
-    longTailTopPercentile?: number
-    freshDays?: number
-  } = {}
+  config?: OfflineEvalConfig
+): EvaluationResult
+// Implementation
+export function evaluateOffline(
+  exposuresOrDataset: ExposureLog[] | OfflineDataset,
+  popularityOrConfig?: ItemPopularity[] | OfflineEvalConfig,
+  totalClusters?: number,
+  config?: OfflineEvalConfig
 ): EvaluationResult {
-  const { longTailTopPercentile = 0.2, freshDays = 7 } = config
+  // Spec-compliant signature: (dataset: OfflineDataset, config?: OfflineEvalConfig)
+  if (!Array.isArray(exposuresOrDataset)) {
+    const dataset = exposuresOrDataset as OfflineDataset
+    const evalConfig = popularityOrConfig as OfflineEvalConfig | undefined
+    return evaluateOffline(dataset.exposures, dataset.popularity, dataset.totalClusters, evalConfig)
+  }
+
+  // Backward-compatible signature
+  const exposures = exposuresOrDataset as ExposureLog[]
+  const popularity = popularityOrConfig as ItemPopularity[]
+  if (totalClusters === undefined) {
+    throw new Error('totalClusters is required when calling with separate parameters')
+  }
+  const clusters = totalClusters
+  const evalConfig = config ?? {}
+
+  const { longTailTopPercentile = 0.2, freshDays = 7 } = evalConfig
 
   const threshold = calculateLongTailThreshold(popularity, longTailTopPercentile)
 
@@ -592,8 +632,8 @@ export function compareABTest(
   treatment: EvaluationResult
   improvement: Record<string, number>
 } {
-  const control = evaluate(controlExposures, popularity, totalClusters)
-  const treatment = evaluate(treatmentExposures, popularity, totalClusters)
+  const control = evaluateOffline(controlExposures, popularity, totalClusters)
+  const treatment = evaluateOffline(treatmentExposures, popularity, totalClusters)
 
   // 改善率を計算 (正の値 = treatment が良い)
   const improvement: Record<string, number> = {}

@@ -31,7 +31,7 @@ export interface AlgorithmParams {
   diversityCapN: number
   /** 多様性制約: 同一クラスタ上限K デフォルト: 5 */
   diversityCapK: number
-  /** 探索枠（0.0?1.0） デフォルト: 0.15 */
+  /** 探索枠（0.0～1.0） デフォルト: 0.15 */
   explorationBudget: number
   /** 再ランキング対象の最大件数 デフォルト: 200 */
   rerankMaxCandidates: number
@@ -39,6 +39,16 @@ export interface AlgorithmParams {
   rerankMinCandidatesPerCluster: number
   /** スコア重み */
   weights: ScoreWeights
+  /** DNS: クラスタ新規性係数 デフォルト: 0.06 */
+  clusterNoveltyFactor: number
+  /** DNS: 時間新規性の半減期（時間） デフォルト: 72 */
+  timeHalfLifeHours: number
+  /** MMR: 類似度ペナルティ重み デフォルト: 0.15 */
+  mmrSimilarityPenalty: number
+  /** 再ランキング戦略 デフォルト: MMR */
+  rerankStrategy: 'MMR' | 'DPP'
+  /** 理由コード判定閾値 */
+  explainThresholds: ExplainThresholds
 }
 export interface ScoreWeights {
   /** Personal Relevance Score weight */
@@ -56,6 +66,8 @@ export interface PublicMetricsParams {
   priorViews: number
   /** 支持率/支持密度の事前分子 デフォルト: 1 */
   priorLikes: number
+  /** uniqueLikers の平滑化事前値 デフォルト: 1 */
+  priorUniqueLikers: number
   /** 持続の半減期（日） デフォルト: 14 */
   halfLifeDays: number
   /** 公開メトリクスの集計窓（日） デフォルト: 14 */
@@ -67,12 +79,34 @@ export interface SurfacePolicy {
   requireModerated: boolean
 }
 
+export interface ExplainThresholds {
+  /** context component 高閾値 デフォルト: 0.70 */
+  contextHigh: number
+  /** bridge component 高閾値 デフォルト: 0.70 */
+  bridgeHigh: number
+  /** supportDensity 高閾値（絶対値） デフォルト: 0.15 */
+  supportDensityHigh: number
+  /** NEW_IN_CLUSTER の露出上限 デフォルト: 2 */
+  newClusterExposureMax: number
+  /** PRS 類似度最小値 デフォルト: 0.65 */
+  prsSimilarityMin: number
+}
+
 export const DEFAULT_PUBLIC_METRICS_PARAMS: PublicMetricsParams = {
   beta: 1.0,
   priorViews: 10,
   priorLikes: 1,
+  priorUniqueLikers: 1,
   halfLifeDays: 14,
   metricsWindowDays: 14
+}
+
+export const DEFAULT_EXPLAIN_THRESHOLDS: ExplainThresholds = {
+  contextHigh: 0.70,
+  bridgeHigh: 0.70,
+  supportDensityHigh: 0.15,
+  newClusterExposureMax: 2,
+  prsSimilarityMin: 0.65
 }
 
 export const DEFAULT_SURFACE_POLICIES: Record<SurfaceId, SurfacePolicy> = {
@@ -99,7 +133,12 @@ export const DEFAULT_PARAMS: AlgorithmParams = {
   explorationBudget: 0.15,
   rerankMaxCandidates: 200,
   rerankMinCandidatesPerCluster: 1,
-  weights: { prs: 0.55, cvs: 0.25, dns: 0.20 }
+  weights: { prs: 0.55, cvs: 0.25, dns: 0.20 },
+  clusterNoveltyFactor: 0.06,
+  timeHalfLifeHours: 72,
+  mmrSimilarityPenalty: 0.15,
+  rerankStrategy: 'MMR',
+  explainThresholds: { ...DEFAULT_EXPLAIN_THRESHOLDS }
 }
 // ============================================================
 // User Types
@@ -111,11 +150,11 @@ export interface UserStateSnapshot {
   userKey: string
   /** likeWindowMs 内のいいね回数 */
   likeWindowCount: number
-  /** 30秒内のいいね回数 */
-  recentLikeCount30s: number
+  /** 30秒内のいいね回数（OPTIONAL: undefinedの場合rapid penaltyは適用されない） */
+  recentLikeCount30s?: number
   /** 直近のクラスタ露出カウント */
   recentClusterExposures: Record<string, number>
-  /** ユーザーの多様性スライダー値（0.0?1.0） */
+  /** ユーザーの多様性スライダー値（0.0～1.0） */
   diversitySlider: number
   /** ユーザーのCR（Curator Reputation） */
   curatorReputation: number
@@ -126,51 +165,71 @@ export interface UserStateSnapshot {
 // Content Types
 // ============================================================
 
-export type ContentType = 'post' | 'work' | 'collection' | 'note' | 'bridge'
+export type CandidateType = 'post' | 'work' | 'collection' | 'note' | 'bridge'
 
 /** コンテンツ候補 */
 export interface Candidate {
   /** アイテムキー */
   itemKey: string
   /** コンテンツ種別 */
-  type: ContentType
+  type: CandidateType
   /** クラスタID */
   clusterId: string
+  /** クラスタ分類バージョン（任意） */
+  clusterVersion?: string
   /** 作成日時 */
   createdAt: number
+  /** 品質フラグ */
+  qualityFlags: QualityFlags
   /** 特徴量 */
   features: CandidateFeatures
+}
+
+/** PRSの根拠タイプ */
+export type PRSSource = 'saved' | 'liked' | 'following' | 'unknown'
+
+/** 候補用の公開メトリクスヒント（説明用、フルセットより軽量） */
+export interface CandidatePublicMetricsHint {
+  supportDensity?: number
+  supportRate?: number
+  weightedSupportIndex?: number
+  breadth?: number
+  persistenceDays?: number
 }
 
 /** コンテンツ特徴量 */
 export interface CandidateFeatures {
   /** CVSコンポーネント */
   cvsComponents: CVSComponents
-  /** 不正排除済みユニーク閲覧数 */
-  qualifiedUniqueViews: number
-  /** 品質フラグ */
-  qualityFlags: QualityFlags
-  /** 埋め込みベクトル（任意） */
-  embedding?: number[]
   /** PRS（Personal Relevance Score） - 事前計算済み */
   prs?: number
   /** PRSの根拠（任意） */
-  prsSource?: 'saved' | 'liked' | 'following'
+  prsSource?: PRSSource
+  /** 埋め込みベクトル（任意） - L2正規化ベクトル */
+  embedding?: number[]
   /** 公開メトリクス（説明用、任意） */
-  publicMetrics?: PublicMetrics
+  publicMetricsHint?: CandidatePublicMetricsHint
+  /** 不正排除済みユニーク閲覧者数（distinct viewers） */
+  qualifiedUniqueViewers?: number
+  /** ユニークいいね者数（distinct likers） */
+  uniqueLikers?: number
+  /** 重み付きいいね合計 */
+  weightedLikeSum?: number
+  /** 重み付き視聴合計（文化視聴価値） */
+  weightedViews?: number
 }
 
 export interface CVSComponents {
-  /** いいねシグナル（重み付き合計） */
-  likeSignal: number
-  /** コンテキストシグナル（注釈の質） */
-  contextSignal: number
-  /** コレクションシグナル */
-  collectionSignal: number
-  /** ブリッジシグナル */
-  bridgeSignal: number
-  /** 持続シグナル */
-  sustainSignal: number
+  /** いいねシグナル（normalized 0～1） */
+  like: number
+  /** コンテキストシグナル（normalized 0～1） */
+  context: number
+  /** コレクションシグナル（normalized 0～1） */
+  collection: number
+  /** ブリッジシグナル（normalized 0～1） */
+  bridge: number
+  /** 持続シグナル（normalized 0～1） */
+  sustain: number
 }
 
 export interface QualityFlags {
@@ -179,7 +238,7 @@ export interface QualityFlags {
   /** 強制非表示 */
   hardBlock?: boolean
   /** スパム疑い */
-  spamSuspect: boolean
+  spamSuspect?: boolean
 }
 
 // ============================================================
@@ -190,14 +249,18 @@ export interface QualityFlags {
 export interface PublicMetrics {
   /** 支持密度 */
   supportDensity: number
-  /** 支持率 */
+  /** 支持率（raw, uniqueLikers/QUV） */
   supportRate: number
-  /** 文化視聴値 */
+  /** 重み付き支持指数（weightedLikeSum/QUV、1を超える可能性あり） */
+  weightedSupportIndex: number
+  /** 重み付き支持率（clampedで0～1） */
+  weightedSupportRateClamped: number
+  /** 文化視聴値 == weightedViews */
   culturalViewValue: number
-  /** 重み付き視聴合計 */
+  /** 重み付き視聴合計（文化視聴価値と同じ） */
   weightedViews: number
-  /** 不正排除済みユニーク閲覧数 */
-  qualifiedUniqueViews: number
+  /** 不正排除済みユニーク閲覧者数（distinct viewers） */
+  qualifiedUniqueViewers: number
   /** 広がり（実効クラスタ数） */
   breadth: number
   /** 広がりレベル（low/medium/high） */
@@ -210,18 +273,20 @@ export interface PublicMetrics {
   topClusterShare: number
 }
 /** メトリクス計算用の入力データ */
-export interface MetricsInput {
+export interface PublicMetricsInput {
   /** 重み付きいいね合計 */
   weightedLikeSum: number
-  /** 重み付き視聴合計 */
+  /** ユニークいいね者数（distinct likers） */
+  uniqueLikers: number
+  /** 不正排除済みユニーク閲覧者数（distinct viewers） */
+  qualifiedUniqueViewers: number
+  /** 重み付き視聴合計（文化視聴価値） */
   weightedViews: number
-  /** 不正排除済みユニーク閲覧数 */
-  qualifiedUniqueViews: number
   /** 支持者のクラスタ分布（重み、集計窓はpublicMetrics.metricsWindowDaysに準拠） */
   clusterWeights: Record<string, number>
   /** 最初の反応からの日数 */
   daysSinceFirstReaction: number
-  /** 直近7日の反応残存率（アプリ側で窓を揃える） */
+  /** 直近の反応残存率（0～1、アプリ定義） */
   recentReactionRate: number
 }
 // ============================================================
@@ -236,6 +301,8 @@ export interface RankRequest {
   requestId: string
   /** 決定性用シード（任意） */
   requestSeed?: string
+  /** クラスタ分類バージョン（REQUIRED: 全候補に共通のクラスタ体系バージョン） */
+  clusterVersion: string
   /** ユーザー状態 */
   userState: UserStateSnapshot
   /** 候補一覧 */
@@ -261,8 +328,12 @@ export interface RankResponse {
   algorithmId: string
   /** アルゴリズムバージョン */
   algorithmVersion: string
-  /** パラメータセットID（監査/計測用） */
-  paramSetId?: string
+  /** コントラクトバージョン */
+  contractVersion: string
+  /** パラメータセットID（effective paramsのsha256ハッシュ） */
+  paramSetId: string
+  /** パラメータ variant ID（人間可読、任意） */
+  variantId?: string
   /** ランキング結果 */
   ranked: RankedItem[]
   /** 制約レポート */
@@ -272,6 +343,10 @@ export interface RankResponse {
 export interface RankedItem {
   /** アイテムキー */
   itemKey: string
+  /** コンテンツ種別 */
+  type: CandidateType
+  /** クラスタID */
+  clusterId: string
   /** 最終スコア */
   finalScore: number
   /** 理由コード */
@@ -287,13 +362,24 @@ export interface ScoreBreakdown {
   cvs: number
   dns: number
   penalty: number
+  finalScore: number
 }
 
 export interface ConstraintsReport {
+  /** 使用した戦略 */
+  usedStrategy: 'MMR' | 'DPP' | 'NONE'
   /** クラスタ上限が適用された回数 */
-  clusterCapsApplied: number
-  /** 探索枠使用数 */
-  explorationSlotsUsed: number
+  capAppliedCount: number
+  /** 探索枠要求数 */
+  explorationSlotsRequested: number
+  /** 探索枠実際に埋まった数 */
+  explorationSlotsFilled: number
+  /** 実効多様性上限K */
+  effectiveDiversityCapK: number
+  /** 実効探索予算 */
+  effectiveExplorationBudget: number
+  /** 実効重み */
+  effectiveWeights: ScoreWeights
 }
 
 // ============================================================
@@ -352,7 +438,7 @@ export interface LikeWeightInput {
 }
 
 /** いいね重み計算結果 */
-export interface LikeWeight {
+export interface LikeWeightOutput {
   /** 重み値（0.0～1.0） */
   weight: number
   /** 支持力メーター表示用（0～100%） */
@@ -363,5 +449,19 @@ export interface LikeWeight {
   rapidPenaltyApplied: boolean
 }
 
+/** CR（Curator Reputation）設定 */
+export interface CRConfig {
+  /** 最小CR値 */
+  minCR: number
+  /** 最大CR値 */
+  maxCR: number
+  /** 時間減衰の半減期（日） */
+  halfLifeDays: number
+}
 
+// ============================================================
+// Culture Points Types
+// ============================================================
+
+export type { CPEventType, CPLedgerEntry, CPBalanceSummary, StakeRecommendation } from '../core/culture-points'
 

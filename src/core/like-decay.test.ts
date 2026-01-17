@@ -62,6 +62,41 @@ describe('like-decay', () => {
       expect(result.isRapid).toBe(false)
       expect(result.rapidPenaltyApplied).toBe(false)
     })
+
+    test('opts parameter overrides input values', () => {
+      const result = calculateLikeWeight(
+        {
+          likeWindowCount: 10,
+          alpha: 0.05,
+          recentLikeCount30s: 60,
+          rapidPenaltyThreshold: 50,
+          rapidPenaltyMultiplier: 0.5
+        },
+        {
+          alpha: 0.1,
+          rapidPenaltyThreshold: 100,
+          rapidPenaltyMultiplier: 0.2
+        }
+      )
+
+      // Should use opts values, not input values
+      // With higher alpha (0.1), weight should be lower
+      const resultWithInputAlpha = calculateLikeWeight({ likeWindowCount: 10, alpha: 0.05 })
+      expect(result.weight).toBeLessThan(resultWithInputAlpha.weight)
+
+      // Should not be rapid since threshold is now 100, not 50
+      expect(result.isRapid).toBe(false)
+    })
+
+    test('opts parameter works with empty input options', () => {
+      const result = calculateLikeWeight(
+        { likeWindowCount: 10 },
+        { alpha: 0.2 }
+      )
+
+      const resultWithHigherAlpha = calculateLikeWeight({ likeWindowCount: 10, alpha: 0.2 })
+      expect(result.weight).toBeCloseTo(resultWithHigherAlpha.weight)
+    })
   })
 
   describe('predictNextLikeWeight', () => {
