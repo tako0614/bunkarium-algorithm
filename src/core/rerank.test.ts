@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
-import { diversityRerank, primaryRank, rankSync } from './rerank'
-import type { Candidate, CandidateFeatures } from '../types'
+import { diversityRerank, primaryRank, rankSync, rank } from './rerank'
+import type { Candidate, CandidateFeatures, RankRequest } from '../types'
+import { CONTRACT_VERSION } from '../constants'
 
 const baseFeatures: CandidateFeatures = {
   cvsComponents: {
@@ -354,5 +355,119 @@ describe('rerank', () => {
     ).map(item => item.itemKey).sort()
 
     expect(sameScoreSameTime).toEqual(['a-item', 'z-item'])
+  })
+
+  describe('rank (async)', () => {
+    test('returns RankResponse with all required fields', async () => {
+      const request: RankRequest = {
+        contractVersion: CONTRACT_VERSION,
+        requestId: 'test-rank-async',
+        clusterVersion: 'v1',
+        requestSeed: 'test-seed',
+        userState: {
+          userKey: 'user-123',
+          likeWindowCount: 5,
+          recentClusterExposures: {},
+          diversitySlider: 0.5,
+          curatorReputation: 1.0,
+          cpEarned90d: 0
+        },
+        candidates: [
+          createCandidate('item-1', 'cluster-a', 0.9),
+          createCandidate('item-2', 'cluster-a', 0.8),
+          createCandidate('item-3', 'cluster-b', 0.7)
+        ],
+        context: {
+          surface: 'home_mix',
+          nowTs: Date.now()
+        }
+      }
+
+      const response = await rank(request)
+
+      // Verify response structure
+      expect(response.ranked).toBeDefined()
+      expect(response.ranked.length).toBeGreaterThan(0)
+      expect(response.paramSetId).toBeDefined()
+      expect(response.paramSetId.length).toBeGreaterThan(0)
+      expect(response.constraintsReport).toBeDefined()
+      expect(response.constraintsReport.usedStrategy).toBeDefined()
+      expect(response.constraintsReport.effectiveWeights).toBeDefined()
+    })
+
+    test('produces deterministic results with same seed', async () => {
+      const request: RankRequest = {
+        contractVersion: CONTRACT_VERSION,
+        requestId: 'test-determinism',
+        clusterVersion: 'v1',
+        requestSeed: 'fixed-seed-123',
+        userState: {
+          userKey: 'user-456',
+          likeWindowCount: 10,
+          recentClusterExposures: {},
+          diversitySlider: 0.5,
+          curatorReputation: 1.0,
+          cpEarned90d: 50
+        },
+        candidates: [
+          createCandidate('item-1', 'cluster-a', 0.9),
+          createCandidate('item-2', 'cluster-b', 0.8),
+          createCandidate('item-3', 'cluster-c', 0.7),
+          createCandidate('item-4', 'cluster-a', 0.6)
+        ],
+        context: {
+          surface: 'home_mix',
+          nowTs: Date.now()
+        }
+      }
+
+      const response1 = await rank(request)
+      const response2 = await rank(request)
+
+      // Same seed should produce identical results
+      expect(response1.ranked.map(r => r.itemKey)).toEqual(
+        response2.ranked.map(r => r.itemKey)
+      )
+      expect(response1.paramSetId).toBe(response2.paramSetId)
+    })
+
+    test('generates unique paramSetId for different params', async () => {
+      const baseRequest: RankRequest = {
+        contractVersion: CONTRACT_VERSION,
+        requestId: 'test-param-hash',
+        clusterVersion: 'v1',
+        userState: {
+          userKey: 'user-789',
+          likeWindowCount: 5,
+          recentClusterExposures: {},
+          diversitySlider: 0.5,
+          curatorReputation: 1.0,
+          cpEarned90d: 0
+        },
+        candidates: [createCandidate('item-1', 'cluster-a', 0.9)],
+        context: {
+          surface: 'home_mix',
+          nowTs: Date.now()
+        },
+        params: {
+          weights: { prs: 0.55, cvs: 0.25, dns: 0.20 }
+        }
+      }
+
+      const response1 = await rank(baseRequest)
+
+      const modifiedRequest: RankRequest = {
+        ...baseRequest,
+        params: {
+          weights: { prs: 0.6, cvs: 0.3, dns: 0.1 },
+          diversityCapN: 30 // Also change another param to ensure difference
+        }
+      }
+
+      const response2 = await rank(modifiedRequest)
+
+      // Different params should produce different paramSetId
+      expect(response1.paramSetId).not.toBe(response2.paramSetId)
+    })
   })
 })
