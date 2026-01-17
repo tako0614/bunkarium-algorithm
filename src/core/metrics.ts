@@ -161,12 +161,14 @@ export function calculateBreadth(clusterWeights: Record<string, number>): number
 
   let entropy = 0
   for (const p of distribution) {
-    if (p > 0) {
+    // Guard: ensure p is finite and positive to avoid NaN
+    if (p > 0 && Number.isFinite(p)) {
       entropy -= p * Math.log(p)
     }
   }
 
-  return Math.exp(entropy)
+  // Guard: ensure entropy is finite before exp
+  return Number.isFinite(entropy) ? Math.exp(entropy) : 1
 }
 
 /**

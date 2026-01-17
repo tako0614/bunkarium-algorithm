@@ -97,11 +97,22 @@ export function getCRMultiplier(cr: number, config?: CRConfig): number {
   const minCR = config?.minCR ?? 0.1
   const maxCR = config?.maxCR ?? 10.0
 
+  // Guard: if minCR >= maxCR, return middle value
+  if (minCR >= maxCR) {
+    return 1.25 // Middle of [0.5, 2.0]
+  }
+
   // Clamp CR to valid range
   const crC = Math.max(minCR, Math.min(maxCR, cr))
 
   // Logarithmic scaling: x = log10(crC/minCR) / log10(maxCR/minCR)
-  const x = Math.log10(crC / minCR) / Math.log10(maxCR / minCR)
+  const denominator = Math.log10(maxCR / minCR)
+  // Guard: denominator should be > 0 since maxCR > minCR, but check for safety
+  if (denominator <= 0) {
+    return 1.25
+  }
+
+  const x = Math.log10(crC / minCR) / denominator
   const xClamped = Math.max(0, Math.min(1, x))
 
   // Map to [0.5, 2.0]: CRm = 0.5 + 1.5*x
@@ -221,9 +232,12 @@ export function calculateViewWeight(
 
   // Calculate CP multiplier
   // CPm = clamp(1.0, 1.2, 1.0 + 0.2 × log10(1 + cpEarned90d/50))
-  const cpBase = 1.0 + cpEarned90d / 50
+  // Guard: ensure cpBase is positive to avoid Math.log10(<=0) -> NaN/-Infinity
+  const cpBase = Math.max(0.001, 1.0 + cpEarned90d / 50)
   const cpLog = Math.log10(cpBase)
-  const cpMultiplier = Math.max(1.0, Math.min(1.2, 1.0 + 0.2 * cpLog))
+  // Guard: ensure cpLog is finite
+  const safeCpLog = Number.isFinite(cpLog) ? cpLog : 0
+  const cpMultiplier = Math.max(1.0, Math.min(1.2, 1.0 + 0.2 * safeCpLog))
 
   // Calculate final view weight
   // viewWeight = clamp(0.2, 2.0, CRm × CPm)
