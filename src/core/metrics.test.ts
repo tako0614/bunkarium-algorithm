@@ -76,6 +76,42 @@ describe('metrics', () => {
       const result = calculateBreadth(clusterWeights)
       expect(result).toBe(1)
     })
+
+    test('handles exactly 50 clusters without aggregation', () => {
+      const clusterWeights: Record<string, number> = {}
+      for (let i = 0; i < 50; i++) {
+        clusterWeights[`c${i}`] = 1
+      }
+      const result = calculateBreadth(clusterWeights)
+      // With 50 equal clusters, entropy should give exp(H) = 50
+      expect(result).toBeCloseTo(50, 0)
+    })
+
+    test('aggregates clusters when >50 to top 49 + __other__', () => {
+      const clusterWeights: Record<string, number> = {}
+      // Create 60 clusters with varying weights
+      for (let i = 0; i < 60; i++) {
+        clusterWeights[`c${i}`] = 60 - i // c0=60, c1=59, ..., c59=1
+      }
+      const result = calculateBreadth(clusterWeights)
+      // Should still calculate breadth correctly with aggregation
+      expect(result).toBeGreaterThan(1)
+      expect(Number.isFinite(result)).toBe(true)
+    })
+
+    test('handles negative weights by treating them as 0', () => {
+      const clusterWeights = { c1: 10, c2: -5, c3: 5 }
+      const result = calculateBreadth(clusterWeights)
+      // c2 should be ignored (weight <= 0), leaving c1=10, c3=5
+      expect(result).toBeGreaterThan(1)
+      expect(result).toBeLessThan(3)
+    })
+
+    test('handles all zero weights', () => {
+      const clusterWeights = { c1: 0, c2: 0, c3: 0 }
+      const result = calculateBreadth(clusterWeights)
+      expect(result).toBe(0)
+    })
   })
 
   describe('getBreadthLevel', () => {

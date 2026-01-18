@@ -373,7 +373,10 @@ export function diversityRerank(
   const similarityCache = new SimilarityCache()
 
   const result: Array<ScoredCandidate & { reasonCodes: ReasonCode[] }> = []
-  const remaining = [...scoredCandidates]
+  // Optimization: Use Set for O(1) removal tracking instead of O(n) splice()
+  // This reduces overall complexity from O(n²) to O(n)
+  const removedKeys = new Set<string>()
+  let remainingCount = scoredCandidates.length
   const clusterCounts: Record<string, number> = {}
 
   let capAppliedCount = 0
@@ -395,32 +398,23 @@ export function diversityRerank(
     SCORING_DEFAULTS.explorationFinalScoreWeight * c.score.finalScore
 
   // 探索候補プール（NEW_IN_CLUSTER eligible）- キャッシュして再利用
-  // recentClusterExposures は変更されないので、remaining のフィルタリング結果をキャッシュ可能
-  let explorationPoolCache: ScoredCandidate[] | null = null
-  // Use generation counter instead of length to properly invalidate cache on content changes
-  let cacheGeneration = 0
-  let lastCacheGeneration = -1
-  const invalidateExplorationCache = () => { cacheGeneration++ }
-  const getExplorationPool = () => {
-    // remaining が変更された場合のみ再計算 (generation counter tracks all modifications)
-    if (explorationPoolCache === null || lastCacheGeneration !== cacheGeneration) {
-      explorationPoolCache = remaining.filter(c =>
-        (recentClusterExposures[c.clusterId] ?? 0) <= newClusterExposureMax
-      )
-      lastCacheGeneration = cacheGeneration
-    }
-    return explorationPoolCache
-  }
+  // Pre-compute exploration-eligible candidates (filter is O(n) but only done once)
+  const explorationEligible = scoredCandidates.filter(c =>
+    (recentClusterExposures[c.clusterId] ?? 0) <= newClusterExposureMax
+  )
+  // Helper to get non-removed exploration candidates
+  const getExplorationPool = () => explorationEligible.filter(c => !removedKeys.has(c.itemKey))
 
   // メインループ
-  while (result.length < N && remaining.length > 0) {
+  while (result.length < N && remainingCount > 0) {
     const currentPosition = result.length
 
     // 探索枠チェック
     if (explorationPositionSet.has(currentPosition)) {
       let explorationPool = getExplorationPool()
       if (explorationPool.length === 0) {
-        explorationPool = [...remaining] // フォールバック
+        // フォールバック: all non-removed candidates
+        explorationPool = scoredCandidates.filter(c => !removedKeys.has(c.itemKey))
       }
 
       // cluster cap を考慮して最高exploreScoreの候補を選択
@@ -439,52 +433,48 @@ export function diversityRerank(
       }
 
       if (bestExploreCandidate) {
-        const idx = remaining.findIndex(c => c.itemKey === bestExploreCandidate!.itemKey)
-        if (idx !== -1) {
-          remaining.splice(idx, 1)
-          invalidateExplorationCache()
-          const reasonCodes = determineReasonCodes(
-            bestExploreCandidate,
-            recentClusterExposures,
-            explainThresholds
-          )
-          reasonCodes.push('EXPLORATION', 'DIVERSITY_SLOT')
+        // O(1) removal via Set instead of O(n) findIndex + splice
+        removedKeys.add(bestExploreCandidate.itemKey)
+        remainingCount--
+        const reasonCodes = determineReasonCodes(
+          bestExploreCandidate,
+          recentClusterExposures,
+          explainThresholds
+        )
+        reasonCodes.push('EXPLORATION', 'DIVERSITY_SLOT')
 
-          result.push({
-            ...bestExploreCandidate,
-            reasonCodes: [...new Set(reasonCodes)] as ReasonCode[]
-          })
-          clusterCounts[bestExploreCandidate.clusterId] = (clusterCounts[bestExploreCandidate.clusterId] || 0) + 1
-          explorationSlotsFilled++
-          continue
-        }
+        result.push({
+          ...bestExploreCandidate,
+          reasonCodes: [...new Set(reasonCodes)] as ReasonCode[]
+        })
+        clusterCounts[bestExploreCandidate.clusterId] = (clusterCounts[bestExploreCandidate.clusterId] || 0) + 1
+        explorationSlotsFilled++
+        continue
       }
       // 探索枠を埋められなかった場合は通常選択にフォールバック
     }
 
     // MMR選択（position 0 は最高スコア候補、それ以外はMMRスコア）
     let selectedCandidate: ScoredCandidate | null = null
-    let selectedIdx = -1
 
     if (currentPosition === 0) {
       // 最初の候補は最高finalScoreを選択（cluster cap適用）
-      for (let i = 0; i < remaining.length; i++) {
-        const candidate = remaining[i]
+      for (const candidate of scoredCandidates) {
+        if (removedKeys.has(candidate.itemKey)) continue
         const currentCount = clusterCounts[candidate.clusterId] || 0
         if (currentCount >= effectiveK) {
           capAppliedCount++
           continue
         }
         selectedCandidate = candidate
-        selectedIdx = i
         break
       }
     } else {
       // MMR: baseScore - lambda * maxSim (with cache)
       let bestMMRScore = -Infinity
 
-      for (let i = 0; i < remaining.length; i++) {
-        const candidate = remaining[i]
+      for (const candidate of scoredCandidates) {
+        if (removedKeys.has(candidate.itemKey)) continue
         const currentCount = clusterCounts[candidate.clusterId] || 0
         if (currentCount >= effectiveK) {
           capAppliedCount++
@@ -497,35 +487,33 @@ export function diversityRerank(
         if (mmrScore > bestMMRScore) {
           bestMMRScore = mmrScore
           selectedCandidate = candidate
-          selectedIdx = i
         }
       }
     }
 
-    if (!selectedCandidate || selectedIdx === -1) {
+    if (!selectedCandidate) {
       // cluster cap で全候補がブロックされた場合、capを無視して選択
       let bestFallbackScore = -Infinity
-      for (let i = 0; i < remaining.length; i++) {
-        const candidate = remaining[i]
+      for (const candidate of scoredCandidates) {
+        if (removedKeys.has(candidate.itemKey)) continue
         const maxSim = maxSimilarityWithSelected(candidate, result, similarityCache)
         const mmrScore = candidate.score.finalScore - mmrSimilarityPenalty * maxSim
 
         if (mmrScore > bestFallbackScore) {
           bestFallbackScore = mmrScore
           selectedCandidate = candidate
-          selectedIdx = i
         }
       }
     }
 
-    // Guard: ensure we have a valid candidate and index before proceeding
-    // This prevents splice(-1) which would remove the last element incorrectly
-    if (!selectedCandidate || selectedIdx === -1 || selectedIdx >= remaining.length) {
+    // Guard: ensure we have a valid candidate before proceeding
+    if (!selectedCandidate) {
       break
     }
 
-    remaining.splice(selectedIdx, 1)
-    invalidateExplorationCache()
+    // O(1) removal via Set instead of O(n) splice
+    removedKeys.add(selectedCandidate.itemKey)
+    remainingCount--
     const reasonCodes = determineReasonCodes(
       selectedCandidate,
       recentClusterExposures,

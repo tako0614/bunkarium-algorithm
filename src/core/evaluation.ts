@@ -493,8 +493,18 @@ export function calculateFairnessDivergence(
   const expectedSum = expected.reduce((a, b) => a + b, 0)
   const actualSum = actual.reduce((a, b) => a + b, 0)
 
-  const normalizedExpected = expected.map(e => e / expectedSum)
-  const normalizedActual = actual.map(a => actualSum > 0 ? a / actualSum : 1 / actual.length)
+  // Guard: 両方の分布が全てゼロの場合は発散なし
+  if (expectedSum <= 0 && actualSum <= 0) return 0
+  // Guard: empty array guard for fallback division
+  const n = expected.length
+  if (n === 0) return 0
+
+  const normalizedExpected = expectedSum > 0
+    ? expected.map(e => e / expectedSum)
+    : expected.map(() => 1 / n)
+  const normalizedActual = actualSum > 0
+    ? actual.map(a => a / actualSum)
+    : actual.map(() => 1 / n)
 
   // Jensen-Shannon Divergence
   const m = normalizedExpected.map((e, i) => (e + normalizedActual[i]) / 2)

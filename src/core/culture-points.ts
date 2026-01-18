@@ -1,5 +1,7 @@
 // Culture Points (CP) issuance and ledger helpers.
 
+import { CULTURE_POINTS_DEFAULTS } from './defaults'
+
 export type CPEventType =
   | 'mint_note_adopted'
   | 'mint_note_referenced'
@@ -186,7 +188,8 @@ export function calculateCPIssuance(
   }
 
   const diminishingMultiplier = calculateCPDiminishingMultiplier(recentEventCount, config)
-  const safeCrMultiplier = Math.max(0.9, Math.min(1.1, crMultiplier))
+  const { min: crMin, max: crMax } = CULTURE_POINTS_DEFAULTS.issuanceCRMultiplier
+  const safeCrMultiplier = Math.max(crMin, Math.min(crMax, crMultiplier))
   const amount = Math.round(baseAmount * diminishingMultiplier * safeCrMultiplier)
 
   return {
@@ -503,11 +506,12 @@ export function detectCPFraud(
     e.eventType.startsWith('mint_')
   )
 
+  const { fraudDetection } = CULTURE_POINTS_DEFAULTS
   const reasons: string[] = []
   let fraudScore = 0
 
   const eventsPerDay = userEntries.length / safeWindowDays
-  if (eventsPerDay > 50) {
+  if (eventsPerDay > fraudDetection.eventFrequencyThreshold) {
     reasons.push(`High event frequency: ${eventsPerDay.toFixed(1)}/day`)
     fraudScore += 0.3
   }
@@ -516,7 +520,7 @@ export function detectCPFraud(
   const diminishedRate = userEntries.length > 0
     ? diminishedEntries.length / userEntries.length
     : 0
-  if (diminishedRate > 0.8) {
+  if (diminishedRate > fraudDetection.diminishingRateThreshold) {
     reasons.push(`Frequent diminishing: ${(diminishedRate * 100).toFixed(1)}%`)
     fraudScore += 0.2
   }
@@ -529,7 +533,7 @@ export function detectCPFraud(
     }
   }
   const maxObjectCount = Math.max(0, ...Object.values(objectCounts))
-  if (maxObjectCount > 10) {
+  if (maxObjectCount > fraudDetection.maxObjectCountThreshold) {
     reasons.push(`Repeated object minting: ${maxObjectCount} times`)
     fraudScore += 0.3
   }
@@ -541,21 +545,23 @@ export function detectCPFraud(
   const nightRate = userEntries.length > 0
     ? nightEvents.length / userEntries.length
     : 0
-  if (nightRate > 0.5 && nightEvents.length > 10) {
+  if (nightRate > fraudDetection.nightActivityRateThreshold &&
+      nightEvents.length > fraudDetection.nightActivityCountThreshold) {
     reasons.push(`Suspicious night activity: ${(nightRate * 100).toFixed(1)}%`)
     fraudScore += 0.2
   }
 
-  const isFraudulent = fraudScore >= 0.5
+  const isFraudulent = fraudScore >= fraudDetection.fraudThreshold
   let recommendedAction: FraudDetectionResult['recommendedAction'] = 'none'
 
-  if (fraudScore >= 0.8) {
+  const { actionThresholds } = fraudDetection
+  if (fraudScore >= actionThresholds.ban) {
     recommendedAction = 'ban'
-  } else if (fraudScore >= 0.6) {
+  } else if (fraudScore >= actionThresholds.fullSlash) {
     recommendedAction = 'full_slash'
-  } else if (fraudScore >= 0.4) {
+  } else if (fraudScore >= actionThresholds.partialSlash) {
     recommendedAction = 'partial_slash'
-  } else if (fraudScore >= 0.2) {
+  } else if (fraudScore >= actionThresholds.warning) {
     recommendedAction = 'warning'
   }
 
