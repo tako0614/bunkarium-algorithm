@@ -16,6 +16,7 @@ import {
 
 // Re-export for backward compatibility (previously defined locally)
 export { cosineSimilarity }
+export { stableDeterminant as determinant }
 
 // ============================================
 // 共通型定義
@@ -286,47 +287,6 @@ export function buildDPPKernel(
   return L
 }
 
-/**
- * 行列式を計算 (LU分解)
- */
-export function determinant(matrix: number[][]): number {
-  const n = matrix.length
-  if (n === 0) return 1
-  if (n === 1) return matrix[0][0]
-  if (n === 2) return matrix[0][0] * matrix[1][1] - matrix[0][1] * matrix[1][0]
-
-  // LU分解で計算
-  const lu = matrix.map(row => [...row])
-  let det = 1
-
-  for (let i = 0; i < n; i++) {
-    // ピボット選択
-    let maxRow = i
-    for (let k = i + 1; k < n; k++) {
-      if (Math.abs(lu[k][i]) > Math.abs(lu[maxRow][i])) {
-        maxRow = k
-      }
-    }
-
-    if (maxRow !== i) {
-      [lu[i], lu[maxRow]] = [lu[maxRow], lu[i]]
-      det *= -1
-    }
-
-    if (Math.abs(lu[i][i]) < 1e-10) return 0
-
-    det *= lu[i][i]
-
-    for (let k = i + 1; k < n; k++) {
-      const factor = lu[k][i] / lu[i][i]
-      for (let j = i + 1; j < n; j++) {
-        lu[k][j] -= factor * lu[i][j]
-      }
-    }
-  }
-
-  return det
-}
 
 /**
  * 部分集合のカーネル行列を抽出
@@ -603,9 +563,12 @@ export function hybridDiversityRerank(
       // 足りない場合はMMR結果から補完
       const finalResult = [...filtered]
       if (finalResult.length < k) {
+        // O(1) lookup用のSetを作成
+        const addedKeys = new Set(finalResult.map(r => r.itemKey))
         for (const item of mmrResult) {
           if (finalResult.length >= k) break
-          if (!finalResult.find(r => r.itemKey === item.itemKey)) {
+          if (!addedKeys.has(item.itemKey)) {
+            addedKeys.add(item.itemKey)
             finalResult.push(item)
           }
         }

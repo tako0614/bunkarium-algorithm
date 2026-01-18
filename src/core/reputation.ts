@@ -98,6 +98,11 @@ export function getCRMultiplier(cr: number, config?: CRConfig): number {
   const minCR = config?.minCR ?? 0.1
   const maxCR = config?.maxCR ?? 10.0
 
+  // Guard: if minCR <= 0, log10 would produce NaN/-Infinity
+  if (minCR <= 0) {
+    return 1.25 // Middle of [0.5, 2.0]
+  }
+
   // Guard: if minCR >= maxCR, return middle value
   if (minCR >= maxCR) {
     return 1.25 // Middle of [0.5, 2.0]

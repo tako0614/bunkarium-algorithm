@@ -223,6 +223,9 @@ export function calculateEntropy(distribution: number[], normalize: boolean = fa
     }
   }
 
+  // Guard: ensure entropy is finite before returning/normalizing
+  if (!Number.isFinite(entropy)) return 0
+
   if (normalize && distribution.length > 1) {
     const maxEntropy = Math.log2(distribution.length)
     return maxEntropy > 0 ? entropy / maxEntropy : 0
