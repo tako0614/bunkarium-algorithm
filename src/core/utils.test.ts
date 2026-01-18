@@ -14,6 +14,9 @@ import {
   msToDays,
   msToHours,
   clamp,
+  clamp01,
+  round6,
+  round9,
   ensureNonNegative,
   validateNonNegativeValues,
   generateId
@@ -89,6 +92,12 @@ describe('euclideanToSimilarity', () => {
 
   test('approaches 0 for large distance', () => {
     expect(euclideanToSimilarity(1000)).toBeLessThan(0.01)
+  })
+
+  test('handles negative distance (treated as 0)', () => {
+    // Guard: negative distances should be treated as 0 (same point)
+    expect(euclideanToSimilarity(-1)).toBe(1)
+    expect(euclideanToSimilarity(-100)).toBe(1)
   })
 })
 
@@ -289,6 +298,41 @@ describe('clamp', () => {
   test('handles edge cases', () => {
     expect(clamp(0, 0, 10)).toBe(0)
     expect(clamp(10, 0, 10)).toBe(10)
+  })
+})
+
+describe('clamp01', () => {
+  test('clamps value to [0, 1] range', () => {
+    expect(clamp01(0.5)).toBe(0.5)
+    expect(clamp01(-0.5)).toBe(0)
+    expect(clamp01(1.5)).toBe(1)
+    expect(clamp01(0)).toBe(0)
+    expect(clamp01(1)).toBe(1)
+  })
+})
+
+describe('round6', () => {
+  test('rounds to 6 decimal places', () => {
+    expect(round6(0.1234567890)).toBe(0.123457)
+    expect(round6(1.0)).toBe(1)
+    expect(round6(0)).toBe(0)
+  })
+
+  test('preserves precision up to 6 decimals', () => {
+    expect(round6(0.123456)).toBe(0.123456)
+  })
+})
+
+describe('round9', () => {
+  test('rounds to 9 decimal places', () => {
+    expect(round9(0.1234567890123)).toBeCloseTo(0.123456789, 9)
+    expect(round9(1.0)).toBe(1)
+    expect(round9(0)).toBe(0)
+  })
+
+  test('preserves precision up to 9 decimals', () => {
+    const value = 0.123456789
+    expect(round9(value)).toBe(value)
   })
 })
 

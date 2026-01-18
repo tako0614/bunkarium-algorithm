@@ -11,7 +11,9 @@ export function calculateLikeWeight(
   opts?: { alpha?: number; rapidPenaltyThreshold?: number; rapidPenaltyMultiplier?: number }
 ): LikeWeightOutput {
   const n = Math.max(1, input.likeWindowCount)
-  const alpha = opts?.alpha ?? input.alpha ?? DEFAULT_PARAMS.likeDecayAlpha
+  const rawAlpha = opts?.alpha ?? input.alpha ?? DEFAULT_PARAMS.likeDecayAlpha
+  // Spec requirement: alpha MUST be clamped to [0.0, 1.0]. Default 0.05.
+  const alpha = Math.max(0.0, Math.min(1.0, rawAlpha))
   const baseWeight = 1 / (1 + alpha * (n - 1))
 
   const recentLikeCount30s = input.recentLikeCount30s ?? 0

@@ -185,6 +185,34 @@ describe('scoring', () => {
     expect(score).toBeLessThanOrEqual(1)
   })
 
+  test('calculateDNS - handles zero timeHalfLifeHours without Infinity', () => {
+    const now = Date.now()
+    const candidate: Candidate = {
+      ...baseCandidate,
+      createdAt: now - 24 * 60 * 60 * 1000 // 1 day ago
+    }
+
+    // Zero half-life should not produce Infinity/NaN
+    const score = calculateDNS(candidate, {}, now, 0.06, 0)
+    expect(Number.isFinite(score)).toBe(true)
+    expect(score).toBeGreaterThanOrEqual(0)
+    expect(score).toBeLessThanOrEqual(1)
+  })
+
+  test('calculateDNS - handles negative timeHalfLifeHours without Infinity', () => {
+    const now = Date.now()
+    const candidate: Candidate = {
+      ...baseCandidate,
+      createdAt: now - 24 * 60 * 60 * 1000
+    }
+
+    // Negative half-life should not produce Infinity/NaN
+    const score = calculateDNS(candidate, {}, now, 0.06, -10)
+    expect(Number.isFinite(score)).toBe(true)
+    expect(score).toBeGreaterThanOrEqual(0)
+    expect(score).toBeLessThanOrEqual(1)
+  })
+
   test('calculatePenalty - penalizes spam content only', () => {
     const candidate: Candidate = {
       ...baseCandidate,

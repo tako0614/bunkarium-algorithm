@@ -8,6 +8,15 @@
  * - クラスタリング (K-means)
  */
 
+// Import shared vector operations from utils.ts
+import {
+  l2Norm as utilsL2Norm,
+  normalizeVector as utilsNormalizeVector,
+  dotProduct as utilsDotProduct,
+  cosineSimilarity as utilsCosineSimilarity,
+  euclideanDistance as utilsEuclideanDistance
+} from './utils'
+
 // ============================================
 // 基本型定義
 // ============================================
@@ -37,67 +46,55 @@ export interface NearestNeighborResult {
 }
 
 // ============================================
-// ベクトル演算
+// ベクトル演算 (consolidated from utils.ts)
 // ============================================
 
 /**
  * L2ノルム (ユークリッド長さ) を計算
+ * Re-exported from utils.ts for backward compatibility
  */
 export function l2Norm(v: Embedding): number {
-  let sum = 0
-  for (const x of v) {
-    sum += x * x
-  }
-  return Math.sqrt(sum)
+  if (!v || v.length === 0) return 0
+  return utilsL2Norm(v)
 }
 
 /**
  * ベクトルを正規化 (単位ベクトルに変換)
+ * Re-exported from utils.ts for backward compatibility
  */
 export function normalizeVector(v: Embedding): Embedding {
-  const norm = l2Norm(v)
-  if (norm === 0) return v.map(() => 0)
-  return v.map(x => x / norm)
+  if (!v || v.length === 0) return []
+  return utilsNormalizeVector(v)
 }
 
 /**
  * ドット積を計算
+ * Wrapper with dimension validation
  */
 export function dotProduct(a: Embedding, b: Embedding): number {
   if (a.length !== b.length) {
     throw new Error('Vector dimensions must match')
   }
-  let sum = 0
-  for (let i = 0; i < a.length; i++) {
-    sum += a[i] * b[i]
-  }
-  return sum
+  return utilsDotProduct(a, b)
 }
 
 /**
  * コサイン類似度を計算
+ * Alias for cosineSimilarity from utils.ts
  */
 export function cosineSim(a: Embedding, b: Embedding): number {
-  const dot = dotProduct(a, b)
-  const normA = l2Norm(a)
-  const normB = l2Norm(b)
-  if (normA === 0 || normB === 0) return 0
-  return dot / (normA * normB)
+  return utilsCosineSimilarity(a, b)
 }
 
 /**
  * ユークリッド距離を計算
+ * Wrapper with dimension validation
  */
 export function euclideanDistance(a: Embedding, b: Embedding): number {
   if (a.length !== b.length) {
     throw new Error('Vector dimensions must match')
   }
-  let sum = 0
-  for (let i = 0; i < a.length; i++) {
-    const diff = a[i] - b[i]
-    sum += diff * diff
-  }
-  return Math.sqrt(sum)
+  return utilsEuclideanDistance(a, b)
 }
 
 /**
@@ -299,11 +296,18 @@ export function createLSHIndex(config: LSHConfig = DEFAULT_LSH_CONFIG): LSHIndex
     for (let h = 0; h < config.numHashPerTable; h++) {
       const plane: number[] = []
       for (let d = 0; d < config.dimension; d++) {
-        // 正規分布からサンプリング (Box-Muller)
+        // 正規分布からサンプリング (Box-Muller transform)
+        // Guard: ensure u1 and u2 are in valid range (0, 1) exclusive
+        // u1 must be > 0 to avoid log(0) = -Infinity
+        // u2 can be any value in [0, 1] since cos is always finite
         const u1 = Math.max(random(), 1e-12)
         const u2 = random()
-        const normal = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2)
-        plane.push(normal)
+        const logVal = Math.log(u1)
+        // Guard: ensure log result is finite
+        const sqrtPart = Number.isFinite(logVal) ? Math.sqrt(-2 * logVal) : 0
+        const normal = sqrtPart * Math.cos(2 * Math.PI * u2)
+        // Guard: ensure final result is finite
+        plane.push(Number.isFinite(normal) ? normal : 0)
       }
       tableHyperplanes.push(plane)
     }
@@ -343,6 +347,14 @@ export function addToLSHIndex(index: LSHIndex, item: EmbeddedItem): void {
   // 次元チェック
   if (item.embedding.length !== index.config.dimension) {
     throw new Error(`Embedding dimension mismatch: expected ${index.config.dimension}, got ${item.embedding.length}`)
+  }
+
+  // Guard: validate index arrays exist and have correct length
+  if (!index.hyperplanes || index.hyperplanes.length < index.config.numTables) {
+    throw new Error(`LSH index hyperplanes array is invalid or too short`)
+  }
+  if (!index.hashTables || index.hashTables.length < index.config.numTables) {
+    throw new Error(`LSH index hashTables array is invalid or too short`)
   }
 
   // アイテムを保存
@@ -469,7 +481,8 @@ export function fitPCA(
     let vec = Array(dim).fill(0).map(() => Math.random() - 0.5)
     vec = normalizeVector(vec)
 
-    // Power Iteration
+    // Power Iteration with convergence check
+    let prevVec = vec
     for (let iter = 0; iter < maxIterations; iter++) {
       // Av
       const newVec = Array(dim).fill(0)
@@ -483,6 +496,14 @@ export function fitPCA(
       const newNorm = l2Norm(newVec)
       if (newNorm < 1e-10) break
       vec = newVec.map(x => x / newNorm)
+
+      // Convergence check: early exit if change is small
+      let maxDiff = 0
+      for (let i = 0; i < dim; i++) {
+        maxDiff = Math.max(maxDiff, Math.abs(vec[i] - prevVec[i]))
+      }
+      if (maxDiff < 1e-8) break
+      prevVec = vec
     }
 
     components.push(vec)
@@ -577,18 +598,45 @@ export function kmeans(
     })
 
     const totalDist = distances.reduce((a, b) => a + b, 0)
+
+    // Guard: if totalDist is 0 or very small, all remaining points are duplicates
+    // In this case, break to avoid infinite loop
+    if (totalDist < 1e-10) {
+      break
+    }
+
     let threshold = Math.random() * totalDist
+    let foundNew = false
     for (let i = 0; i < n; i++) {
       threshold -= distances[i]
       if (threshold <= 0 && !usedIndices.has(i)) {
         centroids.push([...data[i]])
         usedIndices.add(i)
+        foundNew = true
+        break
+      }
+    }
+
+    // Guard: if no new centroid was found (shouldn't happen normally),
+    // pick first available point to avoid infinite loop
+    if (!foundNew) {
+      for (let i = 0; i < n; i++) {
+        if (!usedIndices.has(i)) {
+          centroids.push([...data[i]])
+          usedIndices.add(i)
+          break
+        }
+      }
+      // If still no point found, all points are used - break
+      if (centroids.length < clusterCount && usedIndices.size >= n) {
         break
       }
     }
   }
 
   // 反復
+  // Use actual centroid count (may be less than clusterCount if duplicates exist)
+  const actualK = centroids.length
   let assignments = Array(n).fill(0)
   let iterations = 0
 
@@ -599,7 +647,7 @@ export function kmeans(
     const newAssignments = data.map(point => {
       let bestCluster = 0
       let bestDist = Infinity
-      for (let c = 0; c < clusterCount; c++) {
+      for (let c = 0; c < actualK; c++) {
         const d = euclideanDistance(point, centroids[c])
         if (d < bestDist) {
           bestDist = d
@@ -622,7 +670,7 @@ export function kmeans(
     if (!changed) break
 
     // 中心更新
-    for (let c = 0; c < clusterCount; c++) {
+    for (let c = 0; c < actualK; c++) {
       const clusterPoints = data.filter((_, i) => assignments[i] === c)
       if (clusterPoints.length > 0) {
         centroids[c] = meanVector(clusterPoints)

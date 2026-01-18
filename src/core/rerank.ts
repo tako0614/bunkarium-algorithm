@@ -13,17 +13,12 @@ import { ALGORITHM_ID, ALGORITHM_VERSION, CONTRACT_VERSION } from '../constants'
 import { calculateMixedScore } from './scoring'
 import { determineReasonCodes } from './explain'
 import { cosineSimilarity, dppSampleGreedy, type DiversityItem } from './diversity'
+import { DIVERSITY_DEFAULTS, SCORING_DEFAULTS } from './defaults'
+import { round9 } from './utils'
 
 // ============================================================
 // 数値精度とハッシュユーティリティ
 // ============================================================
-
-/**
- * finalScoreを9桁精度に丸める（algorithm.md仕様）
- */
-function round9(value: number): number {
-  return Math.round(value * 1e9) / 1e9
-}
 
 /**
  * xorshift64 PRNG（algorithm.md仕様: 決定性乱数生成）
@@ -131,17 +126,17 @@ function adjustWeightsForDiversitySlider(
   baseExploration: number
 ): AdjustedWeights {
   const t = Math.max(0, Math.min(1, diversitySlider))
-  const deltaMax = 0.10
+  const deltaMax = DIVERSITY_DEFAULTS.sliderDeltaMax
   const delta = (2 * t - 1) * deltaMax
 
   let wPrs = baseWeights.prs - delta
-  let wDns = baseWeights.dns + 0.7 * delta
-  let wCvs = baseWeights.cvs + 0.3 * delta
+  let wDns = baseWeights.dns + DIVERSITY_DEFAULTS.sliderDNSWeightRatio * delta
+  let wCvs = baseWeights.cvs + DIVERSITY_DEFAULTS.sliderCVSWeightRatio * delta
 
-  // iterative clamp-renormalize (max 3 iterations)
-  const minW = 0.05
-  const maxW = 0.90
-  for (let iter = 0; iter < 3; iter++) {
+  // iterative clamp-renormalize (max iterations from config)
+  const minW = DIVERSITY_DEFAULTS.sliderMinWeight
+  const maxW = DIVERSITY_DEFAULTS.sliderMaxWeight
+  for (let iter = 0; iter < DIVERSITY_DEFAULTS.sliderMaxIterations; iter++) {
     wPrs = Math.max(minW, Math.min(maxW, wPrs))
     wCvs = Math.max(minW, Math.min(maxW, wCvs))
     wDns = Math.max(minW, Math.min(maxW, wDns))
@@ -156,12 +151,25 @@ function adjustWeightsForDiversitySlider(
     wDns /= sum
   }
 
-  // effective diversity cap K
+  // effective diversity cap K (using configurable multipliers)
   const lerp = (a: number, b: number, t: number) => a + (b - a) * t
-  const effectiveK = Math.max(1, Math.min(baseK + 3, Math.round(baseK * lerp(1.2, 0.6, t))))
+  const effectiveKMultiplier = lerp(
+    DIVERSITY_DEFAULTS.sliderEffectiveKMaxMultiplier,
+    DIVERSITY_DEFAULTS.sliderEffectiveKMinMultiplier,
+    t
+  )
+  const effectiveK = Math.max(1, Math.min(baseK + 3, Math.round(baseK * effectiveKMultiplier)))
 
-  // effective exploration budget
-  const effectiveExplorationBudget = Math.max(0.05, Math.min(0.30, baseExploration * lerp(0.7, 1.3, t)))
+  // effective exploration budget (using configurable multipliers)
+  const explorationMultiplier = lerp(
+    DIVERSITY_DEFAULTS.sliderExplorationMinMultiplier,
+    DIVERSITY_DEFAULTS.sliderExplorationMaxMultiplier,
+    t
+  )
+  const effectiveExplorationBudget = Math.max(
+    DIVERSITY_DEFAULTS.explorationBudgetMin,
+    Math.min(DIVERSITY_DEFAULTS.explorationBudgetMax, baseExploration * explorationMultiplier)
+  )
 
   return {
     weights: { prs: round9(wPrs), cvs: round9(wCvs), dns: round9(wDns) },
@@ -376,14 +384,25 @@ export function diversityRerank(
     : []
   const explorationPositionSet = new Set(explorationPositions)
 
-  // 探索候補プール（NEW_IN_CLUSTER eligible）
-  const getExplorationPool = () => remaining.filter(c =>
-    (recentClusterExposures[c.clusterId] ?? 0) <= newClusterExposureMax
-  )
-
-  // 探索スコア関数: 0.7 * DNS + 0.3 * finalScore
+  // 探索スコア関数: explorationDNSWeight * DNS + explorationFinalScoreWeight * finalScore
   const exploreScore = (c: ScoredCandidate) =>
-    0.7 * c.score.breakdown.dns + 0.3 * c.score.finalScore
+    SCORING_DEFAULTS.explorationDNSWeight * c.score.breakdown.dns +
+    SCORING_DEFAULTS.explorationFinalScoreWeight * c.score.finalScore
+
+  // 探索候補プール（NEW_IN_CLUSTER eligible）- キャッシュして再利用
+  // recentClusterExposures は変更されないので、remaining のフィルタリング結果をキャッシュ可能
+  let explorationPoolCache: ScoredCandidate[] | null = null
+  let lastRemainingLength = remaining.length
+  const getExplorationPool = () => {
+    // remaining が変更された場合のみ再計算
+    if (explorationPoolCache === null || remaining.length !== lastRemainingLength) {
+      explorationPoolCache = remaining.filter(c =>
+        (recentClusterExposures[c.clusterId] ?? 0) <= newClusterExposureMax
+      )
+      lastRemainingLength = remaining.length
+    }
+    return explorationPoolCache
+  }
 
   // メインループ
   while (result.length < N && remaining.length > 0) {
@@ -490,7 +509,9 @@ export function diversityRerank(
       }
     }
 
-    if (!selectedCandidate || selectedIdx === -1) {
+    // Guard: ensure we have a valid candidate and index before proceeding
+    // This prevents splice(-1) which would remove the last element incorrectly
+    if (!selectedCandidate || selectedIdx === -1 || selectedIdx >= remaining.length) {
       break
     }
 

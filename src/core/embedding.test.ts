@@ -211,6 +211,48 @@ describe('embedding', () => {
       expect(result.assignments.length).toBe(10)
       expect(result.assignments.every(a => a >= 0 && a < 3)).toBe(true)
     })
+
+    test('handles duplicate data points without infinite loop', () => {
+      // All duplicate points - K-means++ should handle this gracefully
+      const data = [
+        [1, 1],
+        [1, 1],
+        [1, 1],
+        [1, 1]
+      ]
+
+      const result = kmeans(data, 3)
+      // With all duplicates, can't have 3 unique centroids
+      // Should return at least 1 centroid without hanging
+      expect(result.centroids.length).toBeGreaterThanOrEqual(1)
+      expect(result.centroids.length).toBeLessThanOrEqual(4)
+      expect(result.assignments.length).toBe(4)
+    })
+
+    test('handles mixed duplicate and unique points', () => {
+      const data = [
+        [0, 0],
+        [0, 0], // duplicate
+        [0, 0], // duplicate
+        [10, 10] // unique
+      ]
+
+      const result = kmeans(data, 2)
+      expect(result.centroids.length).toBe(2)
+      expect(result.assignments.length).toBe(4)
+    })
+
+    test('handles empty data', () => {
+      const result = kmeans([], 3)
+      expect(result.centroids.length).toBe(0)
+      expect(result.assignments.length).toBe(0)
+      expect(result.inertia).toBe(0)
+    })
+
+    test('handles k=0', () => {
+      const result = kmeans([[1, 2], [3, 4]], 0)
+      expect(result.centroids.length).toBe(0)
+    })
   })
 
   describe('EmbeddingCache', () => {

@@ -1,16 +1,7 @@
 import type { Candidate, ScoreWeights, ScoreBreakdown, CVSComponents } from '../types'
 import { DEFAULT_PARAMS } from '../types'
-import { SCORING_DEFAULTS } from './defaults'
-
-const LN2 = Math.log(2)
-const clamp01 = (value: number) => Math.min(1, Math.max(0, value))
-
-/**
- * finalScoreを9桁精度に丸める（algorithm.md仕様: cross-implementation compatibility）
- */
-function round9(value: number): number {
-  return Math.round(value * 1e9) / 1e9
-}
+import { SCORING_DEFAULTS, LN2 } from './defaults'
+import { clamp01, round9 } from './utils'
 
 /** CVS component weights (algorithm.md v1.0 defaults) */
 export interface CVSWeights {
@@ -64,9 +55,12 @@ export function calculateDNS(
   const clusterNovelty = 1 / (1 + exposureCount * clusterNoveltyFactor)
 
   const ageHours = Math.max(0, (nowTs - candidate.createdAt) / (1000 * 60 * 60))
-  const timeNovelty = Math.exp(-LN2 * ageHours / timeHalfLifeHours)
+  // Guard: prevent division by zero when timeHalfLifeHours is 0 or negative
+  const safeHalfLife = Math.max(1e-6, timeHalfLifeHours)
+  const timeNovelty = Math.exp(-LN2 * ageHours / safeHalfLife)
 
-  const dns = 0.6 * clusterNovelty + 0.4 * timeNovelty
+  const dns = SCORING_DEFAULTS.dnsClusterNoveltyWeight * clusterNovelty +
+              SCORING_DEFAULTS.dnsTimeNoveltyWeight * timeNovelty
   return clamp01(dns)
 }
 

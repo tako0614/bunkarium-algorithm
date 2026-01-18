@@ -10,6 +10,7 @@ import {
   resolveStake,
   detectCPFraud,
   generateCPSummary,
+  calculateCPRanking,
   DEFAULT_CP_CONFIG,
   type CPLedgerEntry,
   type CPBalanceSummary,
@@ -347,6 +348,36 @@ describe('culture-points', () => {
       expect(result.isFraudulent).toBe(true)
       expect(result.confidence).toBeGreaterThanOrEqual(0.5)
     })
+
+    test('handles zero windowDays without division by zero', () => {
+      const entries: CPLedgerEntry[] = Array(10).fill(null).map((_, i) => ({
+        id: `${i}`,
+        userId: 'u1',
+        eventType: 'mint_note_adopted' as const,
+        amount: 10,
+        timestamp: now - i * 1000
+      }))
+
+      // Zero windowDays should not cause division by zero
+      const result = detectCPFraud(entries, 'u1', 0)
+      expect(Number.isFinite(result.confidence)).toBe(true)
+      expect(result.recommendedAction).toBeDefined()
+    })
+
+    test('handles negative windowDays without division by zero', () => {
+      const entries: CPLedgerEntry[] = Array(10).fill(null).map((_, i) => ({
+        id: `${i}`,
+        userId: 'u1',
+        eventType: 'mint_note_adopted' as const,
+        amount: 10,
+        timestamp: now - i * 1000
+      }))
+
+      // Negative windowDays should not cause division by zero
+      const result = detectCPFraud(entries, 'u1', -5)
+      expect(Number.isFinite(result.confidence)).toBe(true)
+      expect(result.recommendedAction).toBeDefined()
+    })
   })
 
   describe('generateCPSummary', () => {
@@ -363,6 +394,66 @@ describe('culture-points', () => {
       expect(summary).toContain('Culture Points Summary')
       expect(summary).toContain('u1')
       expect(summary).toContain('[Balances]')
+    })
+  })
+
+  describe('calculateCPRanking', () => {
+    const now = Date.now()
+
+    test('returns users ranked by available balance', () => {
+      const entries: CPLedgerEntry[] = [
+        { id: '1', userId: 'u1', eventType: 'mint_note_adopted', amount: 100, timestamp: now },
+        { id: '2', userId: 'u2', eventType: 'mint_note_adopted', amount: 200, timestamp: now },
+        { id: '3', userId: 'u3', eventType: 'mint_note_adopted', amount: 50, timestamp: now }
+      ]
+
+      const ranking = calculateCPRanking(entries, 10)
+
+      expect(ranking.length).toBe(3)
+      expect(ranking[0].userId).toBe('u2')
+      expect(ranking[0].rank).toBe(1)
+      expect(ranking[0].balance.available).toBe(200)
+      expect(ranking[1].userId).toBe('u1')
+      expect(ranking[1].rank).toBe(2)
+      expect(ranking[2].userId).toBe('u3')
+      expect(ranking[2].rank).toBe(3)
+    })
+
+    test('respects topN limit', () => {
+      const entries: CPLedgerEntry[] = [
+        { id: '1', userId: 'u1', eventType: 'mint_note_adopted', amount: 100, timestamp: now },
+        { id: '2', userId: 'u2', eventType: 'mint_note_adopted', amount: 200, timestamp: now },
+        { id: '3', userId: 'u3', eventType: 'mint_note_adopted', amount: 50, timestamp: now },
+        { id: '4', userId: 'u4', eventType: 'mint_note_adopted', amount: 150, timestamp: now }
+      ]
+
+      const ranking = calculateCPRanking(entries, 2)
+
+      expect(ranking.length).toBe(2)
+      expect(ranking[0].userId).toBe('u2')
+      expect(ranking[1].userId).toBe('u4')
+    })
+
+    test('returns empty array for empty entries', () => {
+      const ranking = calculateCPRanking([], 10)
+      expect(ranking.length).toBe(0)
+    })
+
+    test('sorts by totalEarned not available balance', () => {
+      const entries: CPLedgerEntry[] = [
+        { id: '1', userId: 'u1', eventType: 'mint_note_adopted', amount: 100, timestamp: now },
+        { id: '2', userId: 'u1', eventType: 'burn_editorial_application', amount: -30, timestamp: now },
+        { id: '3', userId: 'u2', eventType: 'mint_note_adopted', amount: 80, timestamp: now }
+      ]
+
+      const ranking = calculateCPRanking(entries, 10)
+
+      // Sorted by totalEarned: u1 (100) > u2 (80)
+      expect(ranking[0].userId).toBe('u1')
+      expect(ranking[0].balance.totalEarned).toBe(100)
+      expect(ranking[0].balance.available).toBe(70) // 100 - 30 burn
+      expect(ranking[1].userId).toBe('u2')
+      expect(ranking[1].balance.totalEarned).toBe(80)
     })
   })
 })
