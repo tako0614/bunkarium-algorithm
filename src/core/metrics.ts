@@ -167,8 +167,9 @@ export function calculateBreadth(clusterWeights: Record<string, number>): number
     }
   }
 
-  // Guard: ensure entropy is finite before exp
-  return Number.isFinite(entropy) ? Math.exp(entropy) : 1
+  // Guard: clamp entropy to prevent Math.exp overflow (Math.exp(709) ≈ 8.2e307)
+  const safeEntropy = Math.min(709, entropy)
+  return Number.isFinite(safeEntropy) ? Math.exp(safeEntropy) : 1
 }
 
 /**
