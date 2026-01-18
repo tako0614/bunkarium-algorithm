@@ -122,6 +122,65 @@ describe('diversity', () => {
       const { selected } = dppSampleGreedy(items, 5)
       expect(selected.length).toBe(2)
     })
+
+    test('dppSampleGreedy - handles extreme temperature values', () => {
+      const items = [
+        createItem('a', 0.9, 'c1'),
+        createItem('b', 0.8, 'c2'),
+        createItem('c', 0.7, 'c3')
+      ]
+
+      // Very low temperature (should select deterministically)
+      const { selected: lowTemp } = dppSampleGreedy(items, 2, {
+        qualityWeight: 1.0,
+        diversityWeight: 1.0,
+        temperature: 0.001,
+        regularization: 1e-6
+      })
+      expect(lowTemp.length).toBe(2)
+
+      // Very high temperature
+      const { selected: highTemp } = dppSampleGreedy(items, 2, {
+        qualityWeight: 1.0,
+        diversityWeight: 1.0,
+        temperature: 100,
+        regularization: 1e-6
+      })
+      expect(highTemp.length).toBe(2)
+    })
+
+    test('dppSampleGreedy - handles zero temperature (guard)', () => {
+      const items = [
+        createItem('a', 0.9, 'c1'),
+        createItem('b', 0.8, 'c2')
+      ]
+
+      // Zero temperature should be handled gracefully
+      const { selected } = dppSampleGreedy(items, 2, {
+        qualityWeight: 1.0,
+        diversityWeight: 1.0,
+        temperature: 0,
+        regularization: 1e-6
+      })
+      expect(selected.length).toBe(2)
+    })
+
+    test('dppSampleGreedy - handles zero quality scores', () => {
+      const items = [
+        { itemKey: 'a', score: 0, clusterId: 'c1', embedding: [1, 0, 0] },
+        { itemKey: 'b', score: 0, clusterId: 'c2', embedding: [0, 1, 0] },
+        { itemKey: 'c', score: 0.1, clusterId: 'c3', embedding: [0, 0, 1] }
+      ]
+
+      const { selected } = dppSampleGreedy(items, 2)
+      expect(selected.length).toBeLessThanOrEqual(2)
+    })
+
+    test('dppSampleGreedy - empty items returns empty result', () => {
+      const { selected, indices } = dppSampleGreedy([], 5)
+      expect(selected.length).toBe(0)
+      expect(indices.length).toBe(0)
+    })
   })
 
   describe('slidingWindowFilter', () => {

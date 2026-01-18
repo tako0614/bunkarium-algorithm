@@ -59,9 +59,12 @@ export function euclideanDistance(a: number[], b: number[]): number {
 
 /**
  * ユークリッド距離を類似度に変換 (0-1)
+ * Guard: 負の距離は0として扱う
  */
 export function euclideanToSimilarity(distance: number): number {
-  return 1 / (1 + distance)
+  // Guard: negative distance treated as 0 (same point)
+  const safeDistance = Math.max(0, distance)
+  return 1 / (1 + safeDistance)
 }
 
 /**
@@ -231,25 +234,35 @@ export function calculateEntropy(distribution: number[], normalize: boolean = fa
 /**
  * Gini係数を計算
  *
+ * 0 = 完全平等 (全員同じ)
+ * 1 = 完全不平等 (1人に集中)
+ *
  * @param values - 値の配列（非負）
  * @returns Gini係数 (0-1)
  */
 export function calculateGini(values: number[]): number {
   if (values.length <= 1) return 0
 
+  // 負の値を0に変換
   const nonNegative = values.map(v => Math.max(0, v))
   const sorted = [...nonNegative].sort((a, b) => a - b)
   const n = sorted.length
   const sum = sorted.reduce((a, b) => a + b, 0)
 
-  if (sum <= 0) return 0
+  // Guard: check for zero or very small sum to prevent division issues
+  // Using epsilon to avoid floating point underflow problems
+  if (sum < 1e-100) return 0
 
+  // Gini計算: G = (2 * Σ(i * x_i) - (n + 1) * Σx_i) / (n * Σx_i)
   let weightedSum = 0
   for (let i = 0; i < n; i++) {
     weightedSum += (i + 1) * sorted[i]
   }
 
-  return (2 * weightedSum - (n + 1) * sum) / (n * sum)
+  const result = (2 * weightedSum - (n + 1) * sum) / (n * sum)
+  // Guard: ensure result is finite and within valid range [0, 1]
+  if (!Number.isFinite(result)) return 0
+  return Math.max(0, Math.min(1, result))
 }
 
 // ============================================
@@ -291,6 +304,31 @@ export function msToHours(ms: number): number {
  */
 export function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value))
+}
+
+/**
+ * 値を0-1の範囲にクランプ
+ */
+export function clamp01(value: number): number {
+  return Math.max(0, Math.min(1, value))
+}
+
+// ============================================
+// 数値精度
+// ============================================
+
+/**
+ * 数値を9桁精度に丸める（algorithm.md仕様: cross-implementation compatibility）
+ */
+export function round9(value: number): number {
+  return Math.round(value * 1e9) / 1e9
+}
+
+/**
+ * 数値を6桁精度に丸める（公開メトリクス出力用）
+ */
+export function round6(value: number): number {
+  return Math.round(value * 1e6) / 1e6
 }
 
 /**

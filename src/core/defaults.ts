@@ -77,6 +77,18 @@ export const DIVERSITY_DEFAULTS = {
   sliderMaxWeight: 0.90,
   /** 多様性スライダー: 重み正規化の最大反復回数 */
   sliderMaxIterations: 3,
+  /** 多様性スライダー: DNS重み調整比率 (delta * this) */
+  sliderDNSWeightRatio: 0.7,
+  /** 多様性スライダー: CVS重み調整比率 (delta * this) */
+  sliderCVSWeightRatio: 0.3,
+  /** 多様性スライダー: effectiveK最小乗数 (high diversity) */
+  sliderEffectiveKMinMultiplier: 0.6,
+  /** 多様性スライダー: effectiveK最大乗数 (low diversity) */
+  sliderEffectiveKMaxMultiplier: 1.2,
+  /** 多様性スライダー: 探索予算最小乗数 (low diversity) */
+  sliderExplorationMinMultiplier: 0.7,
+  /** 多様性スライダー: 探索予算最大乗数 (high diversity) */
+  sliderExplorationMaxMultiplier: 1.3,
   /** 探索予算の最小値 */
   explorationBudgetMin: 0.05,
   /** 探索予算の最大値 */
@@ -216,6 +228,9 @@ export const PUBLIC_METRICS_PARAMS = {
 // ============================================
 // 数値計算
 // ============================================
+
+/** 自然対数2（共通定数） */
+export const LN2 = Math.log(2)
 
 export const NUMERICAL_DEFAULTS = {
   /** 行列計算の正則化項 */

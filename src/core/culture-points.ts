@@ -492,7 +492,9 @@ export function detectCPFraud(
   userId: string,
   windowDays: number = 7
 ): FraudDetectionResult {
-  const windowMs = windowDays * 24 * 60 * 60 * 1000
+  // Guard: prevent division by zero when windowDays is 0 or negative
+  const safeWindowDays = Math.max(1, windowDays)
+  const windowMs = safeWindowDays * 24 * 60 * 60 * 1000
   const cutoff = Date.now() - windowMs
 
   const userEntries = entries.filter(e =>
@@ -504,7 +506,7 @@ export function detectCPFraud(
   const reasons: string[] = []
   let fraudScore = 0
 
-  const eventsPerDay = userEntries.length / windowDays
+  const eventsPerDay = userEntries.length / safeWindowDays
   if (eventsPerDay > 50) {
     reasons.push(`High event frequency: ${eventsPerDay.toFixed(1)}/day`)
     fraudScore += 0.3

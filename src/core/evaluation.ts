@@ -9,6 +9,11 @@
  * - 公平性メトリクス
  */
 
+import { calculateGini as calculateGiniFromUtils } from './utils'
+
+// Re-export for backward compatibility
+export { calculateGiniFromUtils as calculateGini }
+
 // ============================================
 // 基本型定義
 // ============================================
@@ -86,37 +91,7 @@ export type OfflineEvalReport = EvaluationResult
 // Gini係数の計算
 // ============================================
 
-/**
- * Gini係数を計算
- *
- * 0 = 完全平等 (全員同じ)
- * 1 = 完全不平等 (1人に集中)
- *
- * @param values - 分布値の配列
- * @returns Gini係数 (0-1)
- */
-export function calculateGini(values: number[]): number {
-  if (values.length === 0) return 0
-  if (values.length === 1) return 0
-
-  // 負の値を0に変換
-  const nonNegative = values.map(v => Math.max(0, v))
-
-  // ソート
-  const sorted = [...nonNegative].sort((a, b) => a - b)
-  const n = sorted.length
-  const sum = sorted.reduce((a, b) => a + b, 0)
-
-  if (sum === 0) return 0
-
-  // Gini計算: G = (2 * Σ(i * x_i) - (n + 1) * Σx_i) / (n * Σx_i)
-  let weightedSum = 0
-  for (let i = 0; i < n; i++) {
-    weightedSum += (i + 1) * sorted[i]
-  }
-
-  return (2 * weightedSum - (n + 1) * sum) / (n * sum)
-}
+// calculateGini is imported from utils.ts and re-exported above for backward compatibility
 
 /**
  * 露出分布からGini係数を計算
@@ -128,7 +103,7 @@ export function calculateExposureGini(exposures: ExposureLog[]): number {
     itemExposures[exp.itemId] = (itemExposures[exp.itemId] || 0) + 1
   }
 
-  return calculateGini(Object.values(itemExposures))
+  return calculateGiniFromUtils(Object.values(itemExposures))
 }
 
 /**
@@ -151,7 +126,7 @@ export function calculateLikeGini(exposures: ExposureLog[]): number {
     }
   }
 
-  return calculateGini(Object.values(itemLikes))
+  return calculateGiniFromUtils(Object.values(itemLikes))
 }
 
 // ============================================
@@ -304,6 +279,8 @@ export function calculateClusterEntropy(exposures: ExposureLog[]): number {
   }
 
   // 正規化 (最大エントロピー = log2(クラスタ数))
+  // Guard: clusters.length が 0 または 1 の場合は 0 を返す
+  if (clusters.length <= 1) return 0
   const maxEntropy = Math.log2(clusters.length)
   return maxEntropy > 0 ? entropy / maxEntropy : 0
 }
@@ -592,7 +569,7 @@ export function evaluateOffline(
   const threshold = calculateLongTailThreshold(popularity, longTailTopPercentile)
 
   return {
-    giniCoefficient: calculateGini(popularity.map(p => p.totalExposures)),
+    giniCoefficient: calculateGiniFromUtils(popularity.map(p => p.totalExposures)),
     exposureGini: calculateExposureGini(exposures),
     likeGini: calculateLikeGini(exposures),
     longTailExposureRate: calculateLongTailExposureRate(exposures, popularity, longTailTopPercentile),

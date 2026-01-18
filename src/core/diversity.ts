@@ -7,7 +7,15 @@
  */
 
 import { DIVERSITY_DEFAULTS, NUMERICAL_DEFAULTS } from './defaults'
-import { determinant as stableDeterminant } from './utils'
+import {
+  determinant as stableDeterminant,
+  cosineSimilarity,
+  euclideanDistance,
+  euclideanToSimilarity
+} from './utils'
+
+// Re-export for backward compatibility (previously defined locally)
+export { cosineSimilarity }
 
 // ============================================
 // 共通型定義
@@ -58,42 +66,17 @@ export const DEFAULT_DPP_CONFIG: DPPConfig = {
 // 類似度計算
 // ============================================
 
-/**
- * コサイン類似度を計算
- */
-export function cosineSimilarity(a: number[], b: number[]): number {
-  if (a.length !== b.length || a.length === 0) return 0
-
-  let dotProduct = 0
-  let normA = 0
-  let normB = 0
-
-  for (let i = 0; i < a.length; i++) {
-    dotProduct += a[i] * b[i]
-    normA += a[i] * a[i]
-    normB += b[i] * b[i]
-  }
-
-  const denominator = Math.sqrt(normA) * Math.sqrt(normB)
-  if (denominator === 0) return 0
-
-  return dotProduct / denominator
-}
+// cosineSimilarity, euclideanDistance, euclideanToSimilarity are imported from utils.ts
+// and re-exported above for backward compatibility
 
 /**
  * ユークリッド距離を類似度に変換
+ * Wrapper for backward compatibility with different signature
  */
 export function euclideanSimilarity(a: number[], b: number[]): number {
   if (a.length !== b.length || a.length === 0) return 0
-
-  let sumSquared = 0
-  for (let i = 0; i < a.length; i++) {
-    const diff = a[i] - b[i]
-    sumSquared += diff * diff
-  }
-
-  // 距離を0-1の類似度に変換 (距離が小さいほど類似度が高い)
-  return 1 / (1 + Math.sqrt(sumSquared))
+  const distance = euclideanDistance(a, b)
+  return euclideanToSimilarity(distance)
 }
 
 /**
@@ -261,25 +244,36 @@ export function buildDPPKernel(
   const n = items.length
   const L: number[][] = Array(n).fill(null).map(() => Array(n).fill(0))
 
-  for (let i = 0; i < n; i++) {
-    for (let j = 0; j < n; j++) {
-      // 品質スコア (正規化)
-      // Guard: ensure score is non-negative to avoid NaN from Math.pow(negative, fractional)
-      const qi = Math.pow(Math.max(0, items[i].score), config.qualityWeight)
-      const qj = Math.pow(Math.max(0, items[j].score), config.qualityWeight)
+  // Guard: clamp qualityWeight to reasonable range (computed once)
+  const safeQW = Math.max(0, Math.min(10, config.qualityWeight))
 
-      // 類似度
+  // Pre-compute quality scores for all items (optimization)
+  const qualityScores: number[] = items.map(item => {
+    const score = Math.max(1e-10, item.score)
+    return Math.pow(score, safeQW)
+  })
+
+  // Build symmetric matrix - only compute upper triangle
+  for (let i = 0; i < n; i++) {
+    const qi = qualityScores[i]
+
+    // Diagonal: L[i,i] = qi^2
+    L[i][i] = qi * qi
+
+    // Upper triangle (j > i), then mirror to lower triangle
+    for (let j = i + 1; j < n; j++) {
+      const qj = qualityScores[j]
+
+      // 類似度 (computed once per pair)
       const similarity = calculateSimilarity(items[i], items[j], 'cosine')
 
       // 多様性カーネル: 類似度が高いほど行列式が小さくなる
-      // L[i,j] = qi * (1 - diversity_weight * sim) * qj for i != j
-      // L[i,i] = qi^2 (対角成分)
-      if (i === j) {
-        L[i][j] = qi * qi
-      } else {
-        const diversityFactor = 1 - config.diversityWeight * similarity
-        L[i][j] = qi * Math.max(0, diversityFactor) * qj
-      }
+      const diversityFactor = 1 - config.diversityWeight * similarity
+      const value = qi * Math.max(0, diversityFactor) * qj
+
+      // Set both L[i][j] and L[j][i] (symmetric)
+      L[i][j] = value
+      L[j][i] = value
     }
   }
 
@@ -366,11 +360,24 @@ export function dppSampleGreedy(
       const testIndices = [...selectedIndices, idx]
       const subL = extractSubKernel(L, testIndices)
       const rawGain = stableDeterminant(subL, config.regularization)
-      const gain = Math.max(0, rawGain)
+
+      // Guard: ensure gain is positive and finite
+      const gain = Math.max(0, Number.isFinite(rawGain) ? rawGain : 0)
       const safeTemperature = Math.max(config.temperature, 1e-6)
 
       // 温度でスケーリング
-      const scaledGain = gain === 0 ? 0 : Math.pow(gain, 1 / safeTemperature)
+      // Guard: avoid Math.pow edge cases (0^fractional = 0, but check for Infinity)
+      let scaledGain: number
+      if (gain <= 0) {
+        scaledGain = 0
+      } else {
+        const exponent = 1 / safeTemperature
+        scaledGain = Math.pow(gain, exponent)
+        // Guard: check result is finite
+        if (!Number.isFinite(scaledGain)) {
+          scaledGain = 0
+        }
+      }
 
       if (Number.isNaN(scaledGain)) {
         continue
@@ -385,7 +392,10 @@ export function dppSampleGreedy(
     if (bestIdx === -1) break
 
     selectedIndices.push(bestIdx)
-    remaining.splice(remaining.indexOf(bestIdx), 1)
+    const idxInRemaining = remaining.indexOf(bestIdx)
+    if (idxInRemaining !== -1) {
+      remaining.splice(idxInRemaining, 1)
+    }
   }
 
   return {

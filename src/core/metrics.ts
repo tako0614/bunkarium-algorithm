@@ -2,15 +2,8 @@
 
 import type { PublicMetricsParams } from '../types'
 import { DEFAULT_PUBLIC_METRICS_PARAMS } from '../types'
-
-const LN2 = Math.log(2)
-
-/**
- * 数値を6桁精度に丸める（公開メトリクス出力用）
- */
-function round6(value: number): number {
-  return Math.round(value * 1e6) / 1e6
-}
+import { round6 } from './utils'
+import { LN2 } from './defaults'
 
 /**
  * クラスタ重みを上位50に集約（パフォーマンス対策）
@@ -73,8 +66,11 @@ export function calculateSupportDensity(
   priorViews: number = 10,
   priorLikes: number = 1
 ): number {
-  const denominator = Math.pow(qualifiedUniqueViewers + priorViews, beta)
-  if (denominator <= 0) return 0
+  // Guard: clamp beta to reasonable range to prevent underflow/overflow
+  const safeBeta = Math.max(-10, Math.min(10, beta))
+  const denominator = Math.pow(qualifiedUniqueViewers + priorViews, safeBeta)
+  // Guard: check for underflow (very small values) and overflow (Infinity)
+  if (!Number.isFinite(denominator) || denominator < 1e-100) return 0
   return (weightedLikeSum + priorLikes) / denominator
 }
 
