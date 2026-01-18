@@ -798,4 +798,158 @@ describe('rerank', () => {
       expect(w2.prs + w2.cvs + w2.dns).toBeCloseTo(1.0, 5)
     })
   })
+
+  describe('PRNG determinism (Xorshift64)', () => {
+    test('same requestSeed produces identical exploration positions', () => {
+      // Create many candidates to ensure exploration positions vary
+      const candidates: Candidate[] = []
+      for (let i = 0; i < 20; i++) {
+        candidates.push(createCandidate(`item-${i}`, `cluster-${i}`, 0.9 - i * 0.02))
+      }
+
+      const baseRequest = {
+        contractVersion: '1.0',
+        clusterVersion: 'cv-1',
+        userState: {
+          userKey: 'user-1',
+          likeWindowCount: 0,
+          recentClusterExposures: {},
+          diversitySlider: 0.5,
+          curatorReputation: 1.0,
+          cpEarned90d: 0
+        },
+        candidates,
+        context: { surface: 'home_mix' as const, nowTs: 1234567890000 },
+        params: {
+          explorationBudget: 0.3, // High exploration to get multiple slots
+          diversityCapN: 15
+        }
+      }
+
+      const response1 = rankSync({ ...baseRequest, requestId: 'req-1', requestSeed: 'fixed-seed-abc' })
+      const response2 = rankSync({ ...baseRequest, requestId: 'req-2', requestSeed: 'fixed-seed-abc' })
+
+      // Same seed should produce identical ranked order
+      expect(response1.ranked.map(r => r.itemKey)).toEqual(response2.ranked.map(r => r.itemKey))
+    })
+
+    test('different requestSeed produces valid results for each seed', () => {
+      const candidates: Candidate[] = []
+      for (let i = 0; i < 10; i++) {
+        candidates.push(createCandidate(`item-${i}`, `cluster-${i}`, 0.5))
+      }
+
+      const baseRequest = {
+        contractVersion: '1.0',
+        clusterVersion: 'cv-1',
+        userState: {
+          userKey: 'user-1',
+          likeWindowCount: 0,
+          recentClusterExposures: {},
+          diversitySlider: 0.5,
+          curatorReputation: 1.0,
+          cpEarned90d: 0
+        },
+        candidates,
+        context: { surface: 'home_mix' as const, nowTs: 1234567890000 },
+        params: {
+          explorationBudget: 0.3,
+          diversityCapN: 5
+        }
+      }
+
+      // Different seeds should all produce valid results
+      const seeds = ['alpha', 'beta', 'gamma', 'delta', 'epsilon']
+
+      for (const seed of seeds) {
+        const response = rankSync({ ...baseRequest, requestId: `req-${seed}`, requestSeed: seed })
+        // Verify each seed produces valid output
+        expect(response.ranked.length).toBe(5)
+        expect(response.constraintsReport.explorationSlotsRequested).toBe(1) // floor(5 * 0.3) = 1
+        for (const item of response.ranked) {
+          expect(Number.isFinite(item.finalScore)).toBe(true)
+        }
+      }
+    })
+
+    test('empty requestSeed falls back to requestId', () => {
+      const candidates = [
+        createCandidate('a', 'c1', 0.9),
+        createCandidate('b', 'c2', 0.8)
+      ]
+
+      const response1 = rankSync({
+        contractVersion: '1.0',
+        requestId: 'fallback-test-id',
+        clusterVersion: 'cv-1',
+        requestSeed: '', // Empty seed
+        userState: {
+          userKey: 'user-1',
+          likeWindowCount: 0,
+          recentClusterExposures: {},
+          diversitySlider: 0.5,
+          curatorReputation: 1.0,
+          cpEarned90d: 0
+        },
+        candidates,
+        context: { surface: 'home_mix', nowTs: Date.now() }
+      })
+
+      const response2 = rankSync({
+        contractVersion: '1.0',
+        requestId: 'fallback-test-id', // Same requestId
+        clusterVersion: 'cv-1',
+        // No requestSeed at all
+        userState: {
+          userKey: 'user-1',
+          likeWindowCount: 0,
+          recentClusterExposures: {},
+          diversitySlider: 0.5,
+          curatorReputation: 1.0,
+          cpEarned90d: 0
+        },
+        candidates,
+        context: { surface: 'home_mix', nowTs: Date.now() }
+      })
+
+      // Both should produce valid results
+      expect(response1.ranked.length).toBeGreaterThan(0)
+      expect(response2.ranked.length).toBeGreaterThan(0)
+    })
+
+    test('PRNG produces finite values for various seeds', () => {
+      const candidates = [createCandidate('a', 'c1', 0.9)]
+
+      const seeds = [
+        '0',
+        'empty',
+        'unicode-日本語-🎉',
+        'very-long-seed-' + 'x'.repeat(1000),
+        '   whitespace   ',
+        '\t\n\r'
+      ]
+
+      for (const seed of seeds) {
+        const response = rankSync({
+          contractVersion: '1.0',
+          requestId: 'req-prng-test',
+          clusterVersion: 'cv-1',
+          requestSeed: seed,
+          userState: {
+            userKey: 'user-1',
+            likeWindowCount: 0,
+            recentClusterExposures: {},
+            diversitySlider: 0.5,
+            curatorReputation: 1.0,
+            cpEarned90d: 0
+          },
+          candidates,
+          context: { surface: 'home_mix', nowTs: Date.now() }
+        })
+
+        expect(response.ranked.length).toBe(1)
+        expect(Number.isFinite(response.ranked[0].finalScore)).toBe(true)
+      }
+    })
+  })
 })

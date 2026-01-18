@@ -172,6 +172,33 @@ export const CULTURE_POINTS_DEFAULTS = {
     successBonusRate: 0.2,
     failureSlashRate: 0.3,
     successThreshold: 0.5
+  },
+  /** CP発行時のCRマルチプライヤ制限 */
+  issuanceCRMultiplier: {
+    min: 0.9,
+    max: 1.1
+  },
+  /** 不正検出設定 */
+  fraudDetection: {
+    /** イベント頻度閾値 (イベント/日) */
+    eventFrequencyThreshold: 50,
+    /** 逓減率閾値 */
+    diminishingRateThreshold: 0.8,
+    /** 同一オブジェクトへの操作回数閾値 */
+    maxObjectCountThreshold: 10,
+    /** 夜間活動率閾値 */
+    nightActivityRateThreshold: 0.5,
+    /** 夜間活動イベント数閾値 */
+    nightActivityCountThreshold: 10,
+    /** 不正判定閾値 */
+    fraudThreshold: 0.5,
+    /** アクション閾値 */
+    actionThresholds: {
+      ban: 0.8,
+      fullSlash: 0.6,
+      partialSlash: 0.4,
+      warning: 0.2
+    }
   }
 } as const
 
