@@ -1,6 +1,7 @@
 // Curator Reputation (CR) helpers.
 
 import type { CRConfig } from '../types'
+import { CR_LEVEL_THRESHOLDS } from './defaults'
 
 export interface CREvent {
   type: CREventType
@@ -120,9 +121,9 @@ export function getCRMultiplier(cr: number, config?: CRConfig): number {
 }
 
 export function getCRLevel(cr: number): 'newcomer' | 'regular' | 'trusted' | 'expert' {
-  if (cr < 0.5) return 'newcomer'
-  if (cr < 2.0) return 'regular'
-  if (cr < 5.0) return 'trusted'
+  if (cr < CR_LEVEL_THRESHOLDS.newcomerMax) return 'newcomer'
+  if (cr < CR_LEVEL_THRESHOLDS.regularMax) return 'regular'
+  if (cr < CR_LEVEL_THRESHOLDS.trustedMax) return 'trusted'
   return 'expert'
 }
 

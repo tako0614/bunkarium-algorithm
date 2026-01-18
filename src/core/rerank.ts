@@ -13,7 +13,7 @@ import { ALGORITHM_ID, ALGORITHM_VERSION, CONTRACT_VERSION } from '../constants'
 import { calculateMixedScore } from './scoring'
 import { determineReasonCodes } from './explain'
 import { cosineSimilarity, dppSampleGreedy, type DiversityItem } from './diversity'
-import { DIVERSITY_DEFAULTS, SCORING_DEFAULTS } from './defaults'
+import { DIVERSITY_DEFAULTS, SCORING_DEFAULTS, HASH_CONSTANTS } from './defaults'
 import { round9 } from './utils'
 
 // ============================================================
@@ -40,7 +40,7 @@ class Xorshift64 {
     // Guard: ensure state doesn't become 0 after operations
     if (this.state === 0n) this.state = 1n
     // Use 2^32 for proper [0, 1) range
-    const result = Number(this.state & 0xffffffffn) / 0x100000000
+    const result = Number(this.state & 0xffffffffn) / HASH_CONSTANTS.prngDivisor
     return Math.max(0, Math.min(1, result))
   }
 }
@@ -49,10 +49,10 @@ class Xorshift64 {
  * 文字列をシードに変換（FNV-1a ハッシュ）
  */
 function hashToSeed(input: string): bigint {
-  let hash = 14695981039346656037n
+  let hash = HASH_CONSTANTS.fnv1aOffsetBasis
   for (let i = 0; i < input.length; i++) {
     hash ^= BigInt(input.charCodeAt(i))
-    hash = (hash * 1099511628211n) & 0xffffffffffffffffn
+    hash = (hash * HASH_CONSTANTS.fnv1aPrime) & HASH_CONSTANTS.fnv1aBitMask
   }
   return hash
 }
@@ -397,14 +397,17 @@ export function diversityRerank(
   // 探索候補プール（NEW_IN_CLUSTER eligible）- キャッシュして再利用
   // recentClusterExposures は変更されないので、remaining のフィルタリング結果をキャッシュ可能
   let explorationPoolCache: ScoredCandidate[] | null = null
-  let lastRemainingLength = remaining.length
+  // Use generation counter instead of length to properly invalidate cache on content changes
+  let cacheGeneration = 0
+  let lastCacheGeneration = -1
+  const invalidateExplorationCache = () => { cacheGeneration++ }
   const getExplorationPool = () => {
-    // remaining が変更された場合のみ再計算
-    if (explorationPoolCache === null || remaining.length !== lastRemainingLength) {
+    // remaining が変更された場合のみ再計算 (generation counter tracks all modifications)
+    if (explorationPoolCache === null || lastCacheGeneration !== cacheGeneration) {
       explorationPoolCache = remaining.filter(c =>
         (recentClusterExposures[c.clusterId] ?? 0) <= newClusterExposureMax
       )
-      lastRemainingLength = remaining.length
+      lastCacheGeneration = cacheGeneration
     }
     return explorationPoolCache
   }
@@ -439,6 +442,7 @@ export function diversityRerank(
         const idx = remaining.findIndex(c => c.itemKey === bestExploreCandidate!.itemKey)
         if (idx !== -1) {
           remaining.splice(idx, 1)
+          invalidateExplorationCache()
           const reasonCodes = determineReasonCodes(
             bestExploreCandidate,
             recentClusterExposures,
@@ -521,6 +525,7 @@ export function diversityRerank(
     }
 
     remaining.splice(selectedIdx, 1)
+    invalidateExplorationCache()
     const reasonCodes = determineReasonCodes(
       selectedCandidate,
       recentClusterExposures,
@@ -631,9 +636,19 @@ function diversityRerankDPP(
 // ============================================================
 
 /**
- * Full ranking pipeline（algorithm.md仕様）
+ * Shared ranking result (used by both rank and rankSync)
  */
-export async function rank(request: RankRequest): Promise<RankResponse> {
+interface RankingResult {
+  ranked: RankedItem[]
+  report: ConstraintsReport
+  effectiveParams: AlgorithmParams
+  fullParams: AlgorithmParams
+}
+
+/**
+ * Prepare and execute ranking pipeline (shared logic for rank/rankSync)
+ */
+function prepareAndRank(request: RankRequest): RankingResult {
   const params = request.params ?? {}
 
   // パラメータマージ
@@ -719,13 +734,35 @@ export async function rank(request: RankRequest): Promise<RankResponse> {
     scoreBreakdown: item.score.breakdown
   }))
 
-  // paramSetId 計算
+  // 有効パラメータ（paramSetId計算用）
   const effectiveParams: AlgorithmParams = {
     ...fullParams,
     weights: effectiveWeights,
     diversityCapK: effectiveK,
     explorationBudget: effectiveExplorationBudget
   }
+
+  return { ranked, report, effectiveParams, fullParams }
+}
+
+/**
+ * Compute sync paramSetId using simple DJB2 hash
+ */
+function computeParamSetIdSync(params: AlgorithmParams): string {
+  const canonical = JSON.stringify(params, Object.keys(params).sort())
+  let hash = 0
+  for (let i = 0; i < canonical.length; i++) {
+    hash = ((hash << 5) - hash) + canonical.charCodeAt(i)
+    hash |= 0
+  }
+  return Math.abs(hash).toString(16).padStart(16, '0')
+}
+
+/**
+ * Full ranking pipeline（algorithm.md仕様）
+ */
+export async function rank(request: RankRequest): Promise<RankResponse> {
+  const { ranked, report, effectiveParams, fullParams } = prepareAndRank(request)
   const paramSetId = await computeParamSetId(effectiveParams)
 
   return {
@@ -744,99 +781,8 @@ export async function rank(request: RankRequest): Promise<RankResponse> {
  * 同期版 rank（テスト用、paramSetIdは簡易ハッシュ）
  */
 export function rankSync(request: RankRequest): RankResponse {
-  const params = request.params ?? {}
-
-  const baseWeights = {
-    ...DEFAULT_PARAMS.weights,
-    ...(params.weights ?? {})
-  }
-  const publicMetrics = {
-    ...DEFAULT_PARAMS.publicMetrics,
-    ...(params.publicMetrics ?? {})
-  }
-  const surfacePolicies = {
-    ...DEFAULT_SURFACE_POLICIES,
-    ...(params.surfacePolicies ?? {})
-  }
-  const explainThresholds = {
-    ...DEFAULT_PARAMS.explainThresholds,
-    ...(params.explainThresholds ?? {})
-  }
-
-  const fullParams: AlgorithmParams = {
-    ...DEFAULT_PARAMS,
-    ...params,
-    weights: baseWeights,
-    publicMetrics,
-    surfacePolicies,
-    explainThresholds
-  }
-
-  const { weights: effectiveWeights, effectiveK, effectiveExplorationBudget } =
-    adjustWeightsForDiversitySlider(
-      baseWeights,
-      request.userState.diversitySlider,
-      fullParams.diversityCapK,
-      fullParams.explorationBudget
-    )
-
-  const surfacePolicy = {
-    ...DEFAULT_SURFACE_POLICIES[request.context.surface],
-    ...(fullParams.surfacePolicies?.[request.context.surface] ?? {})
-  }
-  const filteredCandidates = surfacePolicy.requireModerated
-    ? request.candidates.filter(candidate => candidate.qualityFlags.moderated)
-    : request.candidates
-
-  const primaryRanked = primaryRank(
-    filteredCandidates,
-    request.userState.recentClusterExposures,
-    request.context.nowTs,
-    effectiveWeights,
-    fullParams.clusterNoveltyFactor,
-    fullParams.timeHalfLifeHours
-  )
-
-  const diversityCapN = Math.min(fullParams.diversityCapN, primaryRanked.length)
-  const { reranked, report } = diversityRerank(
-    primaryRanked,
-    {
-      diversityCapN,
-      effectiveK,
-      effectiveExplorationBudget,
-      mmrSimilarityPenalty: fullParams.mmrSimilarityPenalty,
-      requestSeed: request.requestSeed ?? request.requestId,
-      recentClusterExposures: request.userState.recentClusterExposures,
-      explainThresholds,
-      newClusterExposureMax: explainThresholds.newClusterExposureMax,
-      rerankStrategy: fullParams.rerankStrategy
-    },
-    effectiveWeights
-  )
-
-  const ranked: RankedItem[] = reranked.map(item => ({
-    itemKey: item.itemKey,
-    type: item.type,
-    clusterId: item.clusterId,
-    finalScore: item.score.finalScore,
-    reasonCodes: item.reasonCodes,
-    scoreBreakdown: item.score.breakdown
-  }))
-
-  // 同期版は簡易ハッシュ
-  const effectiveParams: AlgorithmParams = {
-    ...fullParams,
-    weights: effectiveWeights,
-    diversityCapK: effectiveK,
-    explorationBudget: effectiveExplorationBudget
-  }
-  const canonical = JSON.stringify(effectiveParams, Object.keys(effectiveParams).sort())
-  let hash = 0
-  for (let i = 0; i < canonical.length; i++) {
-    hash = ((hash << 5) - hash) + canonical.charCodeAt(i)
-    hash |= 0
-  }
-  const paramSetId = Math.abs(hash).toString(16).padStart(16, '0')
+  const { ranked, report, effectiveParams, fullParams } = prepareAndRank(request)
+  const paramSetId = computeParamSetIdSync(effectiveParams)
 
   return {
     requestId: request.requestId,

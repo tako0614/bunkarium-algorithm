@@ -144,16 +144,25 @@ export function scaleVector(v: Embedding, scalar: number): Embedding {
  */
 export function meanVector(vectors: Embedding[]): Embedding {
   if (vectors.length === 0) return []
+  // Guard: validate first vector exists and has non-zero length
+  if (!vectors[0] || vectors[0].length === 0) return []
   const dim = vectors[0].length
   const sum = Array(dim).fill(0)
+  let validCount = 0
 
   for (const v of vectors) {
+    // Guard: skip vectors with mismatched dimensions
+    if (!v || v.length !== dim) continue
+    validCount++
     for (let i = 0; i < dim; i++) {
       sum[i] += v[i]
     }
   }
 
-  return sum.map(x => x / vectors.length)
+  // Guard: if no valid vectors, return zero vector
+  if (validCount === 0) return Array(dim).fill(0)
+
+  return sum.map(x => x / validCount)
 }
 
 // ============================================
@@ -720,8 +729,16 @@ export function kmeans(
   // Inertia (クラスタ内二乗和) を計算
   let inertia = 0
   for (let i = 0; i < n; i++) {
-    const d = euclideanDistance(data[i], centroids[assignments[i]])
-    inertia += d * d
+    // Guard: validate assignment is within bounds
+    const assignment = assignments[i]
+    if (assignment < 0 || assignment >= centroids.length || !centroids[assignment]) {
+      continue
+    }
+    const d = euclideanDistance(data[i], centroids[assignment])
+    // Guard: skip NaN/Infinity distances
+    if (Number.isFinite(d)) {
+      inertia += d * d
+    }
   }
 
   return { centroids, assignments, iterations, inertia }

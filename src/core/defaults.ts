@@ -257,6 +257,34 @@ export const LSH_DEFAULTS = {
 } as const
 
 // ============================================
+// PRNG・ハッシュ定数
+// ============================================
+
+export const HASH_CONSTANTS = {
+  /** FNV-1a オフセット基底 (64-bit) */
+  fnv1aOffsetBasis: 14695981039346656037n,
+  /** FNV-1a 素数 (64-bit) */
+  fnv1aPrime: 1099511628211n,
+  /** FNV-1a ビットマスク (64-bit) */
+  fnv1aBitMask: 0xffffffffffffffffn,
+  /** Xorshift64 PRNG 分母 (2^32) */
+  prngDivisor: 0x100000000
+} as const
+
+// ============================================
+// CR レベル閾値
+// ============================================
+
+export const CR_LEVEL_THRESHOLDS = {
+  /** newcomer -> regular 閾値 */
+  newcomerMax: 0.5,
+  /** regular -> trusted 閾値 */
+  regularMax: 2.0,
+  /** trusted -> expert 閾値 */
+  trustedMax: 5.0
+} as const
+
+// ============================================
 // 型定義
 // ============================================
 
@@ -268,3 +296,5 @@ export type CulturePointsDefaults = typeof CULTURE_POINTS_DEFAULTS
 export type EvaluationDefaults = typeof EVALUATION_DEFAULTS
 export type NumericalDefaults = typeof NUMERICAL_DEFAULTS
 export type LSHDefaults = typeof LSH_DEFAULTS
+export type HashConstants = typeof HASH_CONSTANTS
+export type CRLevelThresholds = typeof CR_LEVEL_THRESHOLDS

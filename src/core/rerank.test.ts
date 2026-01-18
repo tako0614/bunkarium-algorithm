@@ -661,4 +661,141 @@ describe('rerank', () => {
       expect(response.constraintsReport.usedStrategy).toBe('MMR')
     })
   })
+
+  describe('edge cases', () => {
+    test('diversityRerank handles N=0 gracefully', () => {
+      const candidates = [
+        createCandidate('a', 'c1', 0.9),
+        createCandidate('b', 'c2', 0.8)
+      ]
+
+      const now = Date.now()
+      const scored = primaryRank(candidates, {}, now, { prs: 1, cvs: 0, dns: 0 })
+
+      const { reranked, report } = diversityRerank(
+        scored,
+        {
+          diversityCapN: 0,
+          effectiveK: 5,
+          effectiveExplorationBudget: 0.15,
+          mmrSimilarityPenalty: 0.15,
+          requestSeed: 'test',
+          recentClusterExposures: {},
+          explainThresholds: {
+            contextHigh: 0.70,
+            bridgeHigh: 0.70,
+            supportDensityHigh: 0.15,
+            newClusterExposureMax: 2,
+            prsSimilarityMin: 0.65
+          },
+          newClusterExposureMax: 2
+        },
+        { prs: 0.55, cvs: 0.25, dns: 0.20 }
+      )
+
+      expect(reranked).toEqual([])
+      expect(report.usedStrategy).toBe('NONE')
+    })
+
+    test('rankSync handles empty candidates array', () => {
+      const response = rankSync({
+        contractVersion: '1.0',
+        requestId: 'req-empty',
+        clusterVersion: 'cv-1',
+        userState: {
+          userKey: 'user-1',
+          likeWindowCount: 0,
+          recentClusterExposures: {},
+          diversitySlider: 0.5,
+          curatorReputation: 1.0,
+          cpEarned90d: 0
+        },
+        candidates: [],
+        context: { surface: 'home_mix', nowTs: Date.now() }
+      })
+
+      expect(response.ranked).toEqual([])
+      expect(response.constraintsReport.usedStrategy).toBe('NONE')
+    })
+
+    test('cluster cap fallback when all candidates blocked', () => {
+      // All candidates in same cluster, cap=1 should still return at least one
+      const candidates: Candidate[] = [
+        createCandidate('a', 'same-cluster', 0.9),
+        createCandidate('b', 'same-cluster', 0.8),
+        createCandidate('c', 'same-cluster', 0.7)
+      ]
+
+      const response = rankSync({
+        contractVersion: '1.0',
+        requestId: 'req-cap-fallback',
+        clusterVersion: 'cv-1',
+        userState: {
+          userKey: 'user-1',
+          likeWindowCount: 0,
+          recentClusterExposures: {},
+          diversitySlider: 0.5,
+          curatorReputation: 1.0,
+          cpEarned90d: 0
+        },
+        candidates,
+        context: { surface: 'home_mix', nowTs: Date.now() },
+        params: {
+          diversityCapN: 3,
+          diversityCapK: 1,
+          explorationBudget: 0
+        }
+      })
+
+      // Should return at least one item despite cluster cap
+      expect(response.ranked.length).toBeGreaterThanOrEqual(1)
+    })
+
+    test('diversitySlider clamped to [0, 1]', () => {
+      const candidates = [createCandidate('a', 'c1', 0.9)]
+
+      // Slider below 0
+      const response1 = rankSync({
+        contractVersion: '1.0',
+        requestId: 'req-slider-low',
+        clusterVersion: 'cv-1',
+        userState: {
+          userKey: 'user-1',
+          likeWindowCount: 0,
+          recentClusterExposures: {},
+          diversitySlider: -0.5,
+          curatorReputation: 1.0,
+          cpEarned90d: 0
+        },
+        candidates,
+        context: { surface: 'home_mix', nowTs: Date.now() }
+      })
+
+      // Slider above 1
+      const response2 = rankSync({
+        contractVersion: '1.0',
+        requestId: 'req-slider-high',
+        clusterVersion: 'cv-1',
+        userState: {
+          userKey: 'user-1',
+          likeWindowCount: 0,
+          recentClusterExposures: {},
+          diversitySlider: 1.5,
+          curatorReputation: 1.0,
+          cpEarned90d: 0
+        },
+        candidates,
+        context: { surface: 'home_mix', nowTs: Date.now() }
+      })
+
+      // Both should produce valid results
+      expect(response1.ranked.length).toBe(1)
+      expect(response2.ranked.length).toBe(1)
+      // Weights should be normalized and valid
+      const w1 = response1.constraintsReport.effectiveWeights
+      const w2 = response2.constraintsReport.effectiveWeights
+      expect(w1.prs + w1.cvs + w1.dns).toBeCloseTo(1.0, 5)
+      expect(w2.prs + w2.cvs + w2.dns).toBeCloseTo(1.0, 5)
+    })
+  })
 })

@@ -132,12 +132,17 @@ export function generateDetailedExplanation(
 export function calculateContributionRates(
   breakdown: { prs: number; cvs: number; dns: number; penalty: number }
 ): { prs: number; cvs: number; dns: number } {
-  const total = breakdown.prs + breakdown.cvs + breakdown.dns
+  // Guard: validate inputs are finite numbers
+  const safePrs = Number.isFinite(breakdown.prs) ? breakdown.prs : 0
+  const safeCvs = Number.isFinite(breakdown.cvs) ? breakdown.cvs : 0
+  const safeDns = Number.isFinite(breakdown.dns) ? breakdown.dns : 0
+
+  const total = safePrs + safeCvs + safeDns
   if (total === 0) return { prs: 0, cvs: 0, dns: 0 }
 
   return {
-    prs: Math.round((breakdown.prs / total) * 100),
-    cvs: Math.round((breakdown.cvs / total) * 100),
-    dns: Math.round((breakdown.dns / total) * 100)
+    prs: Math.round((safePrs / total) * 100),
+    cvs: Math.round((safeCvs / total) * 100),
+    dns: Math.round((safeDns / total) * 100)
   }
 }
