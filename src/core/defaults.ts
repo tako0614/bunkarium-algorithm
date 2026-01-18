@@ -303,12 +303,12 @@ export const HASH_CONSTANTS = {
 // ============================================
 
 export const CR_LEVEL_THRESHOLDS = {
-  /** newcomer -> regular 閾値 */
-  newcomerMax: 0.5,
-  /** regular -> trusted 閾値 */
-  regularMax: 2.0,
-  /** trusted -> expert 閾値 */
-  trustedMax: 5.0
+  /** explorer -> finder 閾値 */
+  explorerMax: 0.5,
+  /** finder -> curator 閾値 */
+  finderMax: 2.0,
+  /** curator -> archiver 閾値 */
+  curatorMax: 5.0
 } as const
 
 // ============================================

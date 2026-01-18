@@ -71,9 +71,9 @@ describe('reputation', () => {
   })
 
   describe('getCRMultiplier', () => {
-    test('CR=1.0 で乗数 = 1.25 (logarithmic scaling)', () => {
+    test('CR=1.0 で乗数 = 5.05 (logarithmic scaling)', () => {
       const multiplier = getCRMultiplier(1.0)
-      expect(multiplier).toBeCloseTo(1.25, 2)
+      expect(multiplier).toBeCloseTo(5.05, 2)
     })
     test('CRが0以下でも有限値になる', () => {
       expect(getCRMultiplier(0)).toBeFinite()
@@ -87,27 +87,27 @@ describe('reputation', () => {
       expect(highCR).toBeGreaterThan(lowCR)
     })
 
-    test('乗数は0.5〜2.0の範囲内', () => {
-      expect(getCRMultiplier(0.1)).toBeGreaterThanOrEqual(0.5)
-      expect(getCRMultiplier(10.0)).toBeLessThanOrEqual(2.0)
+    test('乗数は0.1〜10.0の範囲内', () => {
+      expect(getCRMultiplier(0.1)).toBeGreaterThanOrEqual(0.1)
+      expect(getCRMultiplier(10.0)).toBeLessThanOrEqual(10.0)
     })
   })
 
   describe('getCRLevel', () => {
-    test('低CRはnewcomer', () => {
-      expect(getCRLevel(0.3)).toBe('newcomer')
+    test('低CRはexplorer', () => {
+      expect(getCRLevel(0.3)).toBe('explorer')
     })
 
-    test('通常CRはregular', () => {
-      expect(getCRLevel(1.0)).toBe('regular')
+    test('通常CRはfinder', () => {
+      expect(getCRLevel(1.0)).toBe('finder')
     })
 
-    test('高CRはtrusted', () => {
-      expect(getCRLevel(3.0)).toBe('trusted')
+    test('高CRはcurator', () => {
+      expect(getCRLevel(3.0)).toBe('curator')
     })
 
-    test('非常に高いCRはexpert', () => {
-      expect(getCRLevel(7.0)).toBe('expert')
+    test('非常に高いCRはarchiver', () => {
+      expect(getCRLevel(7.0)).toBe('archiver')
     })
   })
 
@@ -180,75 +180,77 @@ describe('reputation', () => {
 
   describe('calculateViewWeight', () => {
     test('基本ケース: CR=1.0, cpEarned90d=0', () => {
-      // CR=1.0 -> CRm ≈ 1.25
+      // CR=1.0 -> CRm = 5.05
       // cpEarned90d=0 -> CPm = 1.0
-      // viewWeight = 1.25 * 1.0 = 1.25
+      // viewWeight = 5.05 * 1.0 = 5.05
       const weight = calculateViewWeight(1.0, 0)
-      expect(weight).toBeCloseTo(1.25, 2)
+      expect(weight).toBeCloseTo(5.05, 2)
     })
 
     test('高CR、高CP: CR=5.0, cpEarned90d=500', () => {
-      // CR=5.0 -> CRm ≈ 1.85 (high)
+      // CR=5.0 -> CRm ≈ 8.52 (high)
       // cpEarned90d=500 -> CPm ≈ 1.2 (capped at max)
-      // viewWeight = 1.85 * 1.2 = 2.22 -> clamped to 2.0
+      // viewWeight = 8.52 * 1.2 ≈ 10.22
       const weight = calculateViewWeight(5.0, 500)
-      expect(weight).toBe(2.0) // Max clamp
+      expect(weight).toBeGreaterThan(10.0)
+      expect(weight).toBeLessThanOrEqual(12.0)
     })
 
     test('低CR、低CP: CR=0.2, cpEarned90d=0', () => {
-      // CR=0.2 -> CRm ≈ 0.726 (low)
+      // CR=0.2 -> CRm ≈ 1.59 (log scale: x = log10(2)/2 ≈ 0.15, CRm = 0.1 + 9.9*0.15 ≈ 1.59)
       // cpEarned90d=0 -> CPm = 1.0
-      // viewWeight = 0.726 * 1.0 ≈ 0.726
+      // viewWeight ≈ 1.59
       const weight = calculateViewWeight(0.2, 0)
-      expect(weight).toBeCloseTo(0.726, 2)
+      expect(weight).toBeGreaterThan(1.5)
+      expect(weight).toBeLessThan(2.0)
     })
 
-    test('非常に低いCR: CR=0.05, cpEarned90d=0', () => {
-      // CR=0.05 -> CRm = 0.5 (min)
+    test('非常に低いCR: CR=0.1, cpEarned90d=0', () => {
+      // CR=0.1 -> CRm = 0.1 (min)
       // cpEarned90d=0 -> CPm = 1.0
-      // viewWeight = 0.5 * 1.0 = 0.5
-      const weight = calculateViewWeight(0.05, 0)
-      expect(weight).toBeCloseTo(0.5, 2)
+      // viewWeight = 0.1 * 1.0 = 0.1
+      const weight = calculateViewWeight(0.1, 0)
+      expect(weight).toBeCloseTo(0.1, 2)
     })
 
     test('最小値クランプ: 極端に低い値', () => {
-      // Even with very low values, should not go below 0.2
+      // Even with very low values, should not go below 0.0
       const weight = calculateViewWeight(0.01, 0)
-      expect(weight).toBeGreaterThanOrEqual(0.2)
+      expect(weight).toBeGreaterThanOrEqual(0.0)
     })
 
     test('最大値クランプ: 極端に高い値', () => {
-      // Even with very high values, should not exceed 2.0
+      // Max: CRm=10.0, CPm=1.2, viewWeight=12.0
       const weight = calculateViewWeight(10.0, 1000)
-      expect(weight).toBeLessThanOrEqual(2.0)
-      expect(weight).toBe(2.0)
+      expect(weight).toBeLessThanOrEqual(12.0)
+      expect(weight).toBe(12.0)
     })
 
     test('CP multiplierの計算: cpEarned90d=50', () => {
       // cpEarned90d=50 -> CPm = 1.0 + 0.2 * log10(1 + 50/50) = 1.0 + 0.2 * log10(2) ≈ 1.06
-      // CR=1.0 -> CRm ≈ 1.25
-      // viewWeight ≈ 1.25 * 1.06 ≈ 1.33
+      // CR=1.0 -> CRm = 5.05
+      // viewWeight ≈ 5.05 * 1.06 ≈ 5.35
       const weight = calculateViewWeight(1.0, 50)
-      expect(weight).toBeGreaterThan(1.25)
-      expect(weight).toBeLessThan(1.4)
+      expect(weight).toBeGreaterThan(5.0)
+      expect(weight).toBeLessThan(5.6)
     })
 
     test('CP multiplierの計算: cpEarned90d=250', () => {
       // cpEarned90d=250 -> CPm = 1.0 + 0.2 * log10(1 + 250/50) = 1.0 + 0.2 * log10(6) ≈ 1.155
-      // CR=1.0 -> CRm ≈ 1.25
-      // viewWeight ≈ 1.25 * 1.155 ≈ 1.44
+      // CR=1.0 -> CRm = 5.05
+      // viewWeight ≈ 5.05 * 1.155 ≈ 5.83
       const weight = calculateViewWeight(1.0, 250)
-      expect(weight).toBeGreaterThan(1.4)
-      expect(weight).toBeLessThan(1.5)
+      expect(weight).toBeGreaterThan(5.5)
+      expect(weight).toBeLessThan(6.1)
     })
 
     test('CPm上限クランプ: cpEarned90d=1000', () => {
       // cpEarned90d=1000 -> log10(1 + 1000/50) = log10(21) ≈ 1.32
       // CPm = 1.0 + 0.2 * 1.32 = 1.264 -> clamped to 1.2
-      // CR=1.0 -> CRm ≈ 1.25
-      // viewWeight = 1.25 * 1.2 = 1.5
+      // CR=1.0 -> CRm = 5.05
+      // viewWeight = 5.05 * 1.2 = 6.06
       const weight = calculateViewWeight(1.0, 1000)
-      expect(weight).toBeCloseTo(1.5, 2)
+      expect(weight).toBeCloseTo(6.06, 2)
     })
 
     test('負のCP値を処理: cpEarned90d=-10', () => {
@@ -256,12 +258,12 @@ describe('reputation', () => {
       // cpEarned90d=-10 -> 1 + (-10)/50 = 0.8
       // log10(0.8) is negative, so CPm should be clamped to 1.0
       const weight = calculateViewWeight(1.0, -10)
-      expect(weight).toBeGreaterThanOrEqual(0.2)
-      expect(weight).toBeLessThanOrEqual(2.0)
+      expect(weight).toBeGreaterThanOrEqual(0.0)
+      expect(weight).toBeLessThanOrEqual(12.0)
     })
 
     test('viewWeightは常に有効範囲内', () => {
-      // Test various combinations to ensure output is always in [0.2, 2.0]
+      // Test various combinations to ensure output is always in [0.0, 12.0]
       const testCases = [
         { cr: 0.1, cp: 0 },
         { cr: 0.5, cp: 10 },
@@ -275,8 +277,8 @@ describe('reputation', () => {
 
       for (const { cr, cp } of testCases) {
         const weight = calculateViewWeight(cr, cp)
-        expect(weight).toBeGreaterThanOrEqual(0.2)
-        expect(weight).toBeLessThanOrEqual(2.0)
+        expect(weight).toBeGreaterThanOrEqual(0.0)
+        expect(weight).toBeLessThanOrEqual(12.0)
       }
     })
 
@@ -302,24 +304,24 @@ describe('reputation', () => {
       // Both zero should give minimum sensible weight
       const weight = calculateViewWeight(0, 0)
       expect(weight).toBeFinite()
-      expect(weight).toBeGreaterThanOrEqual(0.2)
+      expect(weight).toBeGreaterThanOrEqual(0.0)
     })
 
     test('非常に大きな値での安定性', () => {
       // Very large values should be handled gracefully
       const weight = calculateViewWeight(100, 10000)
-      expect(weight).toBe(2.0) // Clamped to max
+      expect(weight).toBe(12.0) // Clamped to max
     })
 
     test('handles extreme cpEarned90d values without overflow', () => {
       // Test that extremely large values don't cause Infinity/NaN
       const weight1 = calculateViewWeight(1.0, 1e10)
       expect(Number.isFinite(weight1)).toBe(true)
-      expect(weight1).toBeLessThanOrEqual(2.0)
+      expect(weight1).toBeLessThanOrEqual(12.0)
 
       const weight2 = calculateViewWeight(1.0, -1e10)
       expect(Number.isFinite(weight2)).toBe(true)
-      expect(weight2).toBeGreaterThanOrEqual(0.2)
+      expect(weight2).toBeGreaterThanOrEqual(0.0)
     })
 
     test('handles Infinity cpEarned90d gracefully', () => {

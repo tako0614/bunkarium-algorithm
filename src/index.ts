@@ -130,7 +130,13 @@ export {
   detectCPFraud,
   generateCPSummary,
   calculateCPRanking,
-  DEFAULT_CP_CONFIG
+  DEFAULT_CP_CONFIG,
+
+  // Voting Power
+  calculateVotingPower,
+  getVotingPowerExplanation,
+  predictNextVotingPower,
+  CR_MULTIPLIER_TABLE
 } from './core'
 
 // Version info
