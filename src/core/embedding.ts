@@ -16,6 +16,7 @@ import {
   cosineSimilarity as utilsCosineSimilarity,
   euclideanDistance as utilsEuclideanDistance
 } from './utils'
+import { LSH_DEFAULTS } from './defaults'
 
 // ============================================
 // 基本型定義
@@ -215,13 +216,27 @@ export function similarityMatrix(
   items: EmbeddedItem[],
   metric: 'cosine' | 'euclidean' = 'cosine'
 ): number[][] {
+  if (items.length === 0) return []
+
   const n = items.length
   const matrix: number[][] = Array(n).fill(null).map(() => Array(n).fill(0))
 
   for (let i = 0; i < n; i++) {
+    // Guard: validate embedding exists
+    if (!items[i] || !items[i].embedding || items[i].embedding.length === 0) {
+      matrix[i][i] = 1.0
+      continue
+    }
     matrix[i][i] = 1.0 // 自分自身との類似度
 
     for (let j = i + 1; j < n; j++) {
+      // Guard: validate both embeddings exist
+      if (!items[j] || !items[j].embedding || items[j].embedding.length === 0) {
+        matrix[i][j] = 0
+        matrix[j][i] = 0
+        continue
+      }
+
       let sim: number
       if (metric === 'cosine') {
         sim = cosineSim(items[i].embedding, items[j].embedding)
@@ -230,8 +245,10 @@ export function similarityMatrix(
         sim = 1 / (1 + dist)
       }
 
-      matrix[i][j] = sim
-      matrix[j][i] = sim
+      // Guard: ensure similarity is finite
+      const safeSim = Number.isFinite(sim) ? sim : 0
+      matrix[i][j] = safeSim
+      matrix[j][i] = safeSim
     }
   }
 
@@ -255,10 +272,10 @@ export interface LSHConfig {
 }
 
 export const DEFAULT_LSH_CONFIG: LSHConfig = {
-  numTables: 10,
-  numHashPerTable: 8,
-  dimension: 128,
-  seed: 42
+  numTables: LSH_DEFAULTS.numTables,
+  numHashPerTable: LSH_DEFAULTS.numHashPerTable,
+  dimension: LSH_DEFAULTS.dimension,
+  seed: LSH_DEFAULTS.seed
 }
 
 /** LSHインデックス */
@@ -329,8 +346,23 @@ function computeLSHHash(
   embedding: Embedding,
   hyperplanes: number[][]
 ): string {
+  // Guard: validate inputs
+  if (!embedding || embedding.length === 0 || !hyperplanes || hyperplanes.length === 0) {
+    return ''
+  }
+
   let hash = ''
   for (const plane of hyperplanes) {
+    // Guard: validate plane exists and has matching dimension
+    if (!plane || plane.length === 0) {
+      hash += '0'
+      continue
+    }
+    // Guard: dimension mismatch - use 0 as fallback
+    if (plane.length !== embedding.length) {
+      hash += '0'
+      continue
+    }
     const dot = dotProduct(embedding, plane)
     hash += dot >= 0 ? '1' : '0'
   }
@@ -503,7 +535,8 @@ export function fitPCA(
         maxDiff = Math.max(maxDiff, Math.abs(vec[i] - prevVec[i]))
       }
       if (maxDiff < 1e-8) break
-      prevVec = vec
+      // Guard: copy array instead of reference to avoid mutation issues
+      prevVec = [...vec]
     }
 
     components.push(vec)
@@ -586,7 +619,13 @@ export function kmeans(
   usedIndices.add(firstIdx)
 
   // 残りの中心を距離に比例した確率で選択
-  while (centroids.length < clusterCount) {
+  // Guard: add max attempts to prevent infinite loop in edge cases
+  let initAttempts = 0
+  const maxInitAttempts = n * 2
+
+  while (centroids.length < clusterCount && initAttempts < maxInitAttempts) {
+    initAttempts++
+
     const distances = data.map((point, idx) => {
       if (usedIndices.has(idx)) return 0
       let minDist = Infinity

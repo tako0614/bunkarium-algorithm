@@ -110,6 +110,28 @@ describe('embedding', () => {
       const matrix = similarityMatrix(items)
       expect(matrix[0][1]).toBeCloseTo(matrix[1][0])
     })
+
+    test('empty items returns empty matrix', () => {
+      const matrix = similarityMatrix([])
+      expect(matrix).toEqual([])
+    })
+
+    test('handles items with missing embeddings gracefully', () => {
+      const items: EmbeddedItem[] = [
+        { id: 'a', embedding: [1, 0] },
+        { id: 'b', embedding: [] },  // Empty embedding
+        { id: 'c', embedding: [0, 1] }
+      ]
+
+      const matrix = similarityMatrix(items)
+      expect(matrix.length).toBe(3)
+      // Diagonal should still be 1
+      expect(matrix[0][0]).toBe(1)
+      expect(matrix[2][2]).toBe(1)
+      // Items with empty embedding should have 0 similarity with others
+      expect(matrix[0][1]).toBe(0)
+      expect(matrix[1][2]).toBe(0)
+    })
   })
 
   describe('LSH', () => {

@@ -232,8 +232,10 @@ export function calculateViewWeight(
 
   // Calculate CP multiplier
   // CPm = clamp(1.0, 1.2, 1.0 + 0.2 × log10(1 + cpEarned90d/50))
+  // Guard: clamp cpEarned90d to prevent overflow (reasonable range: -10000 to 10000)
+  const safeCpEarned = Math.max(-10000, Math.min(10000, cpEarned90d))
   // Guard: ensure cpBase is positive to avoid Math.log10(<=0) -> NaN/-Infinity
-  const cpBase = Math.max(0.001, 1.0 + cpEarned90d / 50)
+  const cpBase = Math.max(0.001, 1.0 + safeCpEarned / 50)
   const cpLog = Math.log10(cpBase)
   // Guard: ensure cpLog is finite
   const safeCpLog = Number.isFinite(cpLog) ? cpLog : 0
