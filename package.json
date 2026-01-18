@@ -12,13 +12,14 @@
     }
   },
   "scripts": {
-    "build": "tsc",
-    "dev": "tsc --watch",
+    "build": "tsup",
+    "dev": "tsup --watch",
     "typecheck": "tsc --noEmit",
     "test": "bun test"
   },
   "devDependencies": {
     "@types/bun": "^1.2.0",
+    "tsup": "^8.5.1",
     "typescript": "^5.7.0"
   }
 }

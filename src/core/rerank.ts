@@ -49,7 +49,7 @@ class Xorshift64 {
  * 文字列をシードに変換（FNV-1a ハッシュ）
  */
 function hashToSeed(input: string): bigint {
-  let hash = HASH_CONSTANTS.fnv1aOffsetBasis
+  let hash: bigint = HASH_CONSTANTS.fnv1aOffsetBasis
   for (let i = 0; i < input.length; i++) {
     hash ^= BigInt(input.charCodeAt(i))
     hash = (hash * HASH_CONSTANTS.fnv1aPrime) & HASH_CONSTANTS.fnv1aBitMask
