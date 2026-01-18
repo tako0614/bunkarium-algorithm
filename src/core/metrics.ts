@@ -68,10 +68,14 @@ export function calculateSupportDensity(
 ): number {
   // Guard: clamp beta to reasonable range to prevent underflow/overflow
   const safeBeta = Math.max(-10, Math.min(10, beta))
-  const denominator = Math.pow(qualifiedUniqueViewers + priorViews, safeBeta)
-  // Guard: check for underflow (very small values) and overflow (Infinity)
-  if (!Number.isFinite(denominator) || denominator < 1e-100) return 0
-  return (weightedLikeSum + priorLikes) / denominator
+  // Guard: ensure base value is at least 1e-10 to prevent extreme overflow with negative beta
+  const baseValue = Math.max(1e-10, qualifiedUniqueViewers + priorViews)
+  const denominator = Math.pow(baseValue, safeBeta)
+  // Guard: check for underflow (very small values) and overflow (Infinity/very large)
+  if (!Number.isFinite(denominator) || denominator < 1e-100 || denominator > 1e100) return 0
+  const numerator = Math.max(0, weightedLikeSum + priorLikes)
+  const result = numerator / denominator
+  return Number.isFinite(result) ? result : 0
 }
 
 /**

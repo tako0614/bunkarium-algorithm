@@ -27,6 +27,24 @@ describe('metrics', () => {
 
       expect(lowBeta).toBeGreaterThan(normalBeta)
     })
+
+    test('handles negative beta without overflow', () => {
+      // Negative beta with small base could cause overflow without guard
+      const result = calculateSupportDensity(10, 1, -5)
+      expect(Number.isFinite(result)).toBe(true)
+    })
+
+    test('handles extreme negative beta safely', () => {
+      const result = calculateSupportDensity(10, 0, -10, 1, 1)
+      // With base ~1e-10 and beta=-10, Math.pow would overflow to Infinity
+      // Guard should return 0
+      expect(Number.isFinite(result)).toBe(true)
+    })
+
+    test('handles very large beta safely', () => {
+      const result = calculateSupportDensity(10, 1000, 10)
+      expect(Number.isFinite(result)).toBe(true)
+    })
   })
 
   describe('calculateSupportRate', () => {

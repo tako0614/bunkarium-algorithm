@@ -326,7 +326,22 @@ export function determinant(matrix: number[][]): number {
  * 部分集合のカーネル行列を抽出
  */
 function extractSubKernel(L: number[][], indices: number[]): number[][] {
-  return indices.map(i => indices.map(j => L[i][j]))
+  if (indices.length === 0) return []
+  if (L.length === 0) return []
+
+  return indices.map(i => {
+    // Guard: validate row index is within bounds
+    if (i < 0 || i >= L.length || !L[i]) {
+      return indices.map(() => 0)
+    }
+    return indices.map(j => {
+      // Guard: validate column index is within bounds
+      if (j < 0 || j >= L[i].length) return 0
+      const value = L[i][j]
+      // Guard: sanitize NaN/Infinity values
+      return Number.isFinite(value) ? value : 0
+    })
+  })
 }
 
 /**
@@ -349,13 +364,14 @@ export function dppSampleGreedy(
 
   const L = buildDPPKernel(items, config)
   const selectedIndices: number[] = []
-  const remaining = items.map((_, i) => i)
+  // Optimization: use Set for O(1) deletion instead of array indexOf+splice (O(n))
+  const remainingSet = new Set(items.map((_, i) => i))
 
-  while (selectedIndices.length < k && remaining.length > 0) {
+  while (selectedIndices.length < k && remainingSet.size > 0) {
     let bestIdx = -1
     let bestGain = -Infinity
 
-    for (const idx of remaining) {
+    for (const idx of remainingSet) {
       // 追加時の確率ゲインを計算
       const testIndices = [...selectedIndices, idx]
       const subL = extractSubKernel(L, testIndices)
@@ -392,10 +408,8 @@ export function dppSampleGreedy(
     if (bestIdx === -1) break
 
     selectedIndices.push(bestIdx)
-    const idxInRemaining = remaining.indexOf(bestIdx)
-    if (idxInRemaining !== -1) {
-      remaining.splice(idxInRemaining, 1)
-    }
+    // Optimization: O(1) Set deletion instead of O(n) indexOf+splice
+    remainingSet.delete(bestIdx)
   }
 
   return {

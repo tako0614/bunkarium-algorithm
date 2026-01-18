@@ -31,12 +31,17 @@ class Xorshift64 {
   }
 
   next(): number {
-    let x = this.state
+    // Guard: ensure state is never 0 (would produce all zeros)
+    let x = this.state || 1n
     x ^= x << 13n
     x ^= x >> 7n
     x ^= x << 17n
     this.state = x & 0xffffffffffffffffn
-    return Number(this.state & 0xffffffffn) / 0xffffffff
+    // Guard: ensure state doesn't become 0 after operations
+    if (this.state === 0n) this.state = 1n
+    // Use 2^32 for proper [0, 1) range
+    const result = Number(this.state & 0xffffffffn) / 0x100000000
+    return Math.max(0, Math.min(1, result))
   }
 }
 

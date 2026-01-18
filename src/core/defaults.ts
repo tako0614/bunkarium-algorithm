@@ -242,6 +242,21 @@ export const NUMERICAL_DEFAULTS = {
 } as const
 
 // ============================================
+// LSH (Locality Sensitive Hashing) パラメータ
+// ============================================
+
+export const LSH_DEFAULTS = {
+  /** ハッシュテーブル数 */
+  numTables: 10,
+  /** 各テーブルのハッシュ関数数 */
+  numHashPerTable: 8,
+  /** デフォルト埋め込み次元 */
+  dimension: 128,
+  /** ランダムシード */
+  seed: 42
+} as const
+
+// ============================================
 // 型定義
 // ============================================
 
@@ -252,3 +267,4 @@ export type ReputationDefaults = typeof REPUTATION_DEFAULTS
 export type CulturePointsDefaults = typeof CULTURE_POINTS_DEFAULTS
 export type EvaluationDefaults = typeof EVALUATION_DEFAULTS
 export type NumericalDefaults = typeof NUMERICAL_DEFAULTS
+export type LSHDefaults = typeof LSH_DEFAULTS

@@ -310,5 +310,22 @@ describe('reputation', () => {
       const weight = calculateViewWeight(100, 10000)
       expect(weight).toBe(2.0) // Clamped to max
     })
+
+    test('handles extreme cpEarned90d values without overflow', () => {
+      // Test that extremely large values don't cause Infinity/NaN
+      const weight1 = calculateViewWeight(1.0, 1e10)
+      expect(Number.isFinite(weight1)).toBe(true)
+      expect(weight1).toBeLessThanOrEqual(2.0)
+
+      const weight2 = calculateViewWeight(1.0, -1e10)
+      expect(Number.isFinite(weight2)).toBe(true)
+      expect(weight2).toBeGreaterThanOrEqual(0.2)
+    })
+
+    test('handles Infinity cpEarned90d gracefully', () => {
+      // Guard should clamp Infinity to safe range
+      const weight = calculateViewWeight(1.0, Infinity)
+      expect(Number.isFinite(weight)).toBe(true)
+    })
   })
 })
