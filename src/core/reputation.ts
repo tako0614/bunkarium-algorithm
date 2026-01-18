@@ -100,12 +100,12 @@ export function getCRMultiplier(cr: number, config?: CRConfig): number {
 
   // Guard: if minCR <= 0, log10 would produce NaN/-Infinity
   if (minCR <= 0) {
-    return 1.25 // Middle of [0.5, 2.0]
+    return 5.0 // Middle of [0.0, 10.0]
   }
 
   // Guard: if minCR >= maxCR, return middle value
   if (minCR >= maxCR) {
-    return 1.25 // Middle of [0.5, 2.0]
+    return 5.0 // Middle of [0.0, 10.0]
   }
 
   // Clamp CR to valid range
@@ -115,21 +115,21 @@ export function getCRMultiplier(cr: number, config?: CRConfig): number {
   const denominator = Math.log10(maxCR / minCR)
   // Guard: denominator should be > 0 since maxCR > minCR, but check for safety
   if (denominator <= 0) {
-    return 1.25
+    return 5.0
   }
 
   const x = Math.log10(crC / minCR) / denominator
   const xClamped = Math.max(0, Math.min(1, x))
 
-  // Map to [0.5, 2.0]: CRm = 0.5 + 1.5*x
-  return Math.max(0.5, Math.min(2.0, 0.5 + 1.5 * xClamped))
+  // Map to [0.1, 10.0]: CRm = 0.1 + 9.9 * x
+  return Math.max(0.1, Math.min(10.0, 0.1 + 9.9 * xClamped))
 }
 
-export function getCRLevel(cr: number): 'newcomer' | 'regular' | 'trusted' | 'expert' {
-  if (cr < CR_LEVEL_THRESHOLDS.newcomerMax) return 'newcomer'
-  if (cr < CR_LEVEL_THRESHOLDS.regularMax) return 'regular'
-  if (cr < CR_LEVEL_THRESHOLDS.trustedMax) return 'trusted'
-  return 'expert'
+export function getCRLevel(cr: number): 'explorer' | 'finder' | 'curator' | 'archiver' {
+  if (cr < CR_LEVEL_THRESHOLDS.explorerMax) return 'explorer'
+  if (cr < CR_LEVEL_THRESHOLDS.finderMax) return 'finder'
+  if (cr < CR_LEVEL_THRESHOLDS.curatorMax) return 'curator'
+  return 'archiver'
 }
 
 export function evaluateBridgeSuccess(
@@ -226,14 +226,14 @@ export function evaluateNoteSettlement(
  * @param curatorReputation - The curator's reputation score (CR)
  * @param cpEarned90d - Culture Points earned in the last 90 days
  * @param config - Optional CR configuration for getCRMultiplier
- * @returns View weight in range [0.2, 2.0]
+ * @returns View weight in range [0.0, 12.0]
  */
 export function calculateViewWeight(
   curatorReputation: number,
   cpEarned90d: number,
   config?: CRConfig
 ): number {
-  // Get CR multiplier in [0.5, 2.0]
+  // Get CR multiplier in [0.0, 10.0]
   const crMultiplier = getCRMultiplier(curatorReputation, config)
 
   // Calculate CP multiplier
@@ -248,7 +248,7 @@ export function calculateViewWeight(
   const cpMultiplier = Math.max(1.0, Math.min(1.2, 1.0 + 0.2 * safeCpLog))
 
   // Calculate final view weight
-  // viewWeight = clamp(0.2, 2.0, CRm × CPm)
+  // viewWeight = clamp(0.0, 12.0, CRm × CPm)
   const viewWeight = crMultiplier * cpMultiplier
-  return Math.max(0.2, Math.min(2.0, viewWeight))
+  return Math.max(0.0, Math.min(12.0, viewWeight))
 }

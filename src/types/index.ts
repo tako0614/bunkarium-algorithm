@@ -464,4 +464,5 @@ export interface CRConfig {
 // ============================================================
 
 export type { CPEventType, CPLedgerEntry, CPBalanceSummary, StakeRecommendation } from '../core/culture-points'
+export type { VotingPowerInput, VotingPowerOutput } from '../core/voting-power'
 
