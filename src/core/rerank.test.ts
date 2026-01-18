@@ -283,7 +283,7 @@ describe('rerank', () => {
         cpEarned90d: 0
       },
       candidates,
-      context: { surface: 'home_mix', nowTs: 1234567890000 },
+      context: { surface: 'home_mix' as const, nowTs: 1234567890000 },
       requestSeed
     })
 
@@ -300,7 +300,7 @@ describe('rerank', () => {
         cpEarned90d: 0
       },
       candidates,
-      context: { surface: 'home_mix', nowTs: 1234567890000 },
+      context: { surface: 'home_mix' as const, nowTs: 1234567890000 },
       requestSeed
     })
 
@@ -604,7 +604,7 @@ describe('rerank', () => {
           cpEarned90d: 0
         },
         candidates,
-        context: { surface: 'home_mix', nowTs: 1234567890000 },
+        context: { surface: 'home_mix' as const, nowTs: 1234567890000 },
         params: {
           rerankStrategy: 'DPP' as const,
           diversityCapN: 3

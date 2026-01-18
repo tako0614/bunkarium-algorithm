@@ -376,7 +376,7 @@ describe('evaluation', () => {
         { itemId: 'a', clusterId: 'c1', totalExposures: 100, totalLikes: 10, totalSaves: 5, createdAt: oneDayAgo },
         { itemId: 'b', clusterId: 'c1', totalExposures: 50, totalLikes: 5, totalSaves: 2, createdAt: tenDaysAgo }
       ]
-      const rate = calculateFreshItemExposureRate(exposures, popularity, 7, now)
+      const rate = calculateFreshItemExposureRate(exposures, popularity, 7)
       // Only item 'a' is fresh (created 1 day ago, threshold 7 days)
       expect(rate).toBeCloseTo(0.5)
     })
