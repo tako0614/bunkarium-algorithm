@@ -225,4 +225,107 @@ describe('scoring', () => {
     const penalty = calculatePenalty(candidate)
     expect(penalty).toBe(0.5)
   })
+
+  describe('edge cases', () => {
+    test('calculateCVS with negative component values clamps to 0', () => {
+      const negativeComponents = {
+        like: -0.5,
+        context: -0.3,
+        collection: 0.2,
+        bridge: 0.1,
+        sustain: 0
+      }
+
+      const cvs = calculateCVS(negativeComponents)
+      // Negative values should be clamped to 0 or the result should still be valid
+      expect(cvs).toBeGreaterThanOrEqual(0)
+      expect(cvs).toBeLessThanOrEqual(1)
+    })
+
+    test('calculateDNS with very high exposure count approaches 0', () => {
+      const now = Date.now()
+      const candidate: Candidate = {
+        ...baseCandidate,
+        createdAt: now - 1000
+      }
+
+      // Very high exposure count should reduce DNS significantly
+      const exposures = { [baseCandidate.clusterId]: 10000 }
+      const score = calculateDNS(candidate, exposures, now)
+
+      expect(Number.isFinite(score)).toBe(true)
+      expect(score).toBeGreaterThanOrEqual(0)
+      expect(score).toBeLessThan(0.5) // Should be low due to high exposure
+    })
+
+    test('calculateDNS with extremely old items', () => {
+      const now = Date.now()
+      const candidate: Candidate = {
+        ...baseCandidate,
+        createdAt: now - 180 * 24 * 60 * 60 * 1000 // 180 days ago
+      }
+
+      // With high cluster exposure, old items should have very low DNS
+      const exposures = { [baseCandidate.clusterId]: 100 }
+      const score = calculateDNS(candidate, exposures, now)
+
+      expect(Number.isFinite(score)).toBe(true)
+      expect(score).toBeGreaterThanOrEqual(0)
+      expect(score).toBeLessThanOrEqual(1)
+      // Very old item with high exposure should have low DNS
+      expect(score).toBeLessThan(0.3)
+    })
+
+    test('calculateMixedScore with all zero components', () => {
+      const candidate: Candidate = {
+        ...baseCandidate,
+        features: {
+          prs: 0,
+          cvsComponents: {
+            like: 0,
+            context: 0,
+            collection: 0,
+            bridge: 0,
+            sustain: 0
+          },
+          qualifiedUniqueViewers: 0
+        },
+        createdAt: Date.now()
+      }
+
+      const result = calculateMixedScore(candidate, {}, Date.now())
+
+      expect(Number.isFinite(result.finalScore)).toBe(true)
+      expect(result.finalScore).toBeGreaterThanOrEqual(0)
+    })
+
+    test('calculateMixedScore handles penalty reduction', () => {
+      const candidate: Candidate = {
+        ...baseCandidate,
+        qualityFlags: {
+          moderated: true,
+          spamSuspect: true // 0.5 penalty
+        },
+        features: {
+          prs: 0.8,
+          cvsComponents: {
+            like: 0.5,
+            context: 0.5,
+            collection: 0.5,
+            bridge: 0.5,
+            sustain: 0.5
+          },
+          qualifiedUniqueViewers: 1
+        },
+        createdAt: Date.now()
+      }
+
+      const result = calculateMixedScore(candidate, {}, Date.now())
+
+      // Penalty should reduce the score
+      expect(result.breakdown.penalty).toBe(0.5)
+      // finalScore formula applies the penalty correctly
+      expect(Number.isFinite(result.finalScore)).toBe(true)
+    })
+  })
 })

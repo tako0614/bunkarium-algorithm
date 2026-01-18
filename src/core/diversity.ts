@@ -194,12 +194,18 @@ export function mmrRerank(
 ): DiversityItem[] {
   if (candidates.length === 0) return []
   if (k >= candidates.length) return candidates
+  if (k <= 0) return []
 
   const selected: DiversityItem[] = []
   const remaining = [...candidates]
 
+  // Guard: ensure remaining has items before shift
+  if (remaining.length === 0) return []
+
   // 最初のアイテムは最高スコアを選択
-  const first = remaining.shift()!
+  const first = remaining.shift()
+  // Guard: ensure first is defined (defensive)
+  if (!first) return selected
   selected.push(first)
 
   // 残りをMMRで選択
