@@ -18,6 +18,9 @@ export type CREventType =
   | 'stake_failure'
   | 'spam_flag'
   | 'quality_contribution'
+  // Minority discovery bonus: rewarded when user discovers new value early
+  | 'early_discovery'        // Liked content before it became popular
+  | 'cross_cluster_discovery'  // Discovered value outside user's typical clusters
 
 export interface CRWeights {
   noteAdopted: number
@@ -28,6 +31,9 @@ export interface CRWeights {
   stakeFailure: number
   spamFlag: number
   qualityContribution: number
+  // Minority discovery weights
+  earlyDiscovery: number         // Bonus for early adoption of later-popular content
+  crossClusterDiscovery: number  // Bonus for finding value in unfamiliar clusters
 }
 
 export const DEFAULT_CR_WEIGHTS: CRWeights = {
@@ -38,22 +44,27 @@ export const DEFAULT_CR_WEIGHTS: CRWeights = {
   stakeSuccess: 0.20,
   stakeFailure: -0.15,
   spamFlag: -0.30,
-  qualityContribution: 0.08
+  qualityContribution: 0.08,
+  // Discovery bonuses reward users who find new cultural value
+  earlyDiscovery: 0.30,          // High reward for prescient taste
+  crossClusterDiscovery: 0.20    // Reward for expanding cultural horizons
 }
 
 export interface CRFullConfig {
   baseCR: number
-  minCR: number
-  maxCR: number
+  minCR?: number        // Optional: if undefined, no lower limit
+  maxCR?: number        // Optional: if undefined, no upper limit
   decayHalfLifeDays: number
+  learningRate: number  // How fast CR changes (default 0.1)
   weights: CRWeights
 }
 
 export const DEFAULT_CR_CONFIG: CRFullConfig = {
   baseCR: 1.0,
-  minCR: 0.1,
-  maxCR: 10.0,
+  minCR: undefined,     // No lower limit - CR can approach 0
+  maxCR: undefined,     // No upper limit - CR can grow unbounded
   decayHalfLifeDays: 90,
+  learningRate: 0.1,
   weights: DEFAULT_CR_WEIGHTS
 }
 
@@ -73,11 +84,19 @@ export function calculateCR(
     crDelta += weight * decay
   }
 
-  const alpha = 0.1
+  const alpha = config.learningRate ?? 0.1
   let newCR = currentCR + alpha * crDelta
-  newCR = Math.max(config.minCR, Math.min(config.maxCR, newCR))
 
-  return newCR
+  // Apply optional limits (if undefined, no limit)
+  if (config.minCR !== undefined) {
+    newCR = Math.max(config.minCR, newCR)
+  }
+  if (config.maxCR !== undefined) {
+    newCR = Math.min(config.maxCR, newCR)
+  }
+
+  // Ensure CR is always positive (can approach but not go below 0)
+  return Math.max(0.001, newCR)
 }
 
 function getEventWeight(type: CREventType, weights: CRWeights): number {
@@ -90,39 +109,84 @@ function getEventWeight(type: CREventType, weights: CRWeights): number {
     case 'stake_failure': return weights.stakeFailure
     case 'spam_flag': return weights.spamFlag
     case 'quality_contribution': return weights.qualityContribution
+    // Minority discovery bonuses
+    case 'early_discovery': return weights.earlyDiscovery
+    case 'cross_cluster_discovery': return weights.crossClusterDiscovery
     default: return 0
   }
 }
 
+/**
+ * Discovery bonus configuration
+ */
+export interface DiscoveryBonusConfig {
+  /** Popularity threshold for early discovery (default: 0.2) */
+  earlyDiscoveryThreshold?: number;
+  /** Bonus multiplier for early + cross-cluster (default: 2.0) */
+  earlyAndCrossClusterBonus?: number;
+  /** Bonus multiplier for early discovery only (default: 1.5) */
+  earlyOnlyBonus?: number;
+  /** Bonus multiplier for cross-cluster only (default: 1.3) */
+  crossClusterOnlyBonus?: number;
+}
+
+/**
+ * Calculate discovery bonus for likes outside user's typical clusters
+ *
+ * When a user engages with content from unfamiliar clusters, they may be
+ * discovering new cultural value. This function calculates a bonus multiplier
+ * for such "exploration" actions.
+ *
+ * @param userTypicalClusters - Cluster IDs the user typically engages with
+ * @param contentClusterId - Cluster of the content being engaged with
+ * @param contentPopularity - Normalized popularity score (0-1) at time of engagement
+ * @param config - Optional configuration for thresholds and bonus multipliers
+ * @returns Discovery bonus multiplier (1.0 = no bonus, higher = more bonus)
+ */
+export function calculateDiscoveryBonus(
+  userTypicalClusters: string[],
+  contentClusterId: string,
+  contentPopularity: number = 0.5,
+  config?: DiscoveryBonusConfig
+): { isDiscovery: boolean; bonusMultiplier: number; type: 'early' | 'cross_cluster' | 'none' } {
+  const threshold = config?.earlyDiscoveryThreshold ?? 0.2;
+  const earlyAndCrossBonus = config?.earlyAndCrossClusterBonus ?? 2.0;
+  const earlyOnlyBonus = config?.earlyOnlyBonus ?? 1.5;
+  const crossClusterOnlyBonus = config?.crossClusterOnlyBonus ?? 1.3;
+
+  const isCrossCluster = !userTypicalClusters.includes(contentClusterId);
+  const isEarlyDiscovery = contentPopularity < threshold;
+
+  if (isCrossCluster && isEarlyDiscovery) {
+    // Best case: found unpopular content in unfamiliar cluster
+    return { isDiscovery: true, bonusMultiplier: earlyAndCrossBonus, type: 'early' };
+  } else if (isEarlyDiscovery) {
+    // Early discovery within familiar clusters
+    return { isDiscovery: true, bonusMultiplier: earlyOnlyBonus, type: 'early' };
+  } else if (isCrossCluster) {
+    // Cross-cluster exploration (content already somewhat popular)
+    return { isDiscovery: true, bonusMultiplier: crossClusterOnlyBonus, type: 'cross_cluster' };
+  }
+
+  return { isDiscovery: false, bonusMultiplier: 1.0, type: 'none' };
+}
+
+/**
+ * Get CR multiplier for voting power.
+ *
+ * In the new design:
+ * - Raw CR is used when cluster normalization is not applied
+ * - When cluster normalization is applied, use getNormalizedCR() instead
+ * - No artificial limits (0.1-10.0 removed)
+ *
+ * @param cr - The curator's reputation score
+ * @param config - Optional config (deprecated, kept for compatibility)
+ * @returns The CR value directly (no transformation)
+ */
 export function getCRMultiplier(cr: number, config?: CRConfig): number {
-  const minCR = config?.minCR ?? 0.1
-  const maxCR = config?.maxCR ?? 10.0
-
-  // Guard: if minCR <= 0, log10 would produce NaN/-Infinity
-  if (minCR <= 0) {
-    return 5.0 // Middle of [0.0, 10.0]
-  }
-
-  // Guard: if minCR >= maxCR, return middle value
-  if (minCR >= maxCR) {
-    return 5.0 // Middle of [0.0, 10.0]
-  }
-
-  // Clamp CR to valid range
-  const crC = Math.max(minCR, Math.min(maxCR, cr))
-
-  // Logarithmic scaling: x = log10(crC/minCR) / log10(maxCR/minCR)
-  const denominator = Math.log10(maxCR / minCR)
-  // Guard: denominator should be > 0 since maxCR > minCR, but check for safety
-  if (denominator <= 0) {
-    return 5.0
-  }
-
-  const x = Math.log10(crC / minCR) / denominator
-  const xClamped = Math.max(0, Math.min(1, x))
-
-  // Map to [0.1, 10.0]: CRm = 0.1 + 9.9 * x
-  return Math.max(0.1, Math.min(10.0, 0.1 + 9.9 * xClamped))
+  // Simply return the CR value - limits are now optional and handled elsewhere
+  // Ensure positive value
+  return Math.max(0.001, cr)
 }
 
 export function getCRLevel(cr: number): 'explorer' | 'finder' | 'curator' | 'archiver' {
@@ -218,37 +282,39 @@ export function evaluateNoteSettlement(
  * The view weight represents the cultural value of attention from a specific viewer,
  * based on their reputation (CR) and recent contribution activity (CP earned).
  *
- * Formula:
- * - CRm = getCRMultiplier(curatorReputation) in [0.5, 2.0]
- * - CPm = clamp(1.0, 1.2, 1.0 + 0.2 × log10(1 + cpEarned90d/50))
- * - viewWeight = clamp(0.2, 2.0, CRm × CPm)
+ * Formula (unbounded design):
+ * - CRm = getCRMultiplier(curatorReputation) - direct CR value, no limits
+ * - CPm = 1.0 + 0.2 × log10(1 + cpEarned90d/50) - no upper limit
+ * - viewWeight = CRm × CPm - no artificial caps
+ *
+ * Note: In the new zero-sum design, raw viewWeight is unbounded. Cluster
+ * normalization at the application level ensures total speaking power is constant.
  *
  * @param curatorReputation - The curator's reputation score (CR)
  * @param cpEarned90d - Culture Points earned in the last 90 days
  * @param config - Optional CR configuration for getCRMultiplier
- * @returns View weight in range [0.0, 12.0]
+ * @returns View weight (unbounded positive value)
  */
 export function calculateViewWeight(
   curatorReputation: number,
   cpEarned90d: number,
   config?: CRConfig
 ): number {
-  // Get CR multiplier in [0.0, 10.0]
+  // Get CR multiplier (unbounded - direct CR value)
   const crMultiplier = getCRMultiplier(curatorReputation, config)
 
-  // Calculate CP multiplier
-  // CPm = clamp(1.0, 1.2, 1.0 + 0.2 × log10(1 + cpEarned90d/50))
-  // Guard: clamp cpEarned90d to prevent overflow (reasonable range: -10000 to 10000)
-  const safeCpEarned = Math.max(-10000, Math.min(10000, cpEarned90d))
+  // Calculate CP multiplier (unbounded)
+  // CPm = 1.0 + 0.2 × log10(1 + cpEarned90d/50)
   // Guard: ensure cpBase is positive to avoid Math.log10(<=0) -> NaN/-Infinity
-  const cpBase = Math.max(0.001, 1.0 + safeCpEarned / 50)
+  const cpBase = Math.max(0.001, 1.0 + cpEarned90d / 50)
   const cpLog = Math.log10(cpBase)
   // Guard: ensure cpLog is finite
   const safeCpLog = Number.isFinite(cpLog) ? cpLog : 0
-  const cpMultiplier = Math.max(1.0, Math.min(1.2, 1.0 + 0.2 * safeCpLog))
+  // No upper limit on CPm - higher CP = higher multiplier
+  const cpMultiplier = Math.max(1.0, 1.0 + 0.2 * safeCpLog)
 
-  // Calculate final view weight
-  // viewWeight = clamp(0.0, 12.0, CRm × CPm)
+  // Calculate final view weight (unbounded - cluster normalization handles zero-sum)
   const viewWeight = crMultiplier * cpMultiplier
-  return Math.max(0.0, Math.min(12.0, viewWeight))
+  // Only ensure positive value (no upper limit)
+  return Math.max(0.001, viewWeight)
 }

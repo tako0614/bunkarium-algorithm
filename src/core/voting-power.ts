@@ -2,16 +2,23 @@
  * Voting Power System
  *
  * 投票力は以下の要素で決定される:
- * 1. Base Weight (日次いいね逓減): w(n) = 1 / (1 + α(n-1))
- * 2. CR Multiplier (文化度): CRm ∈ [0.5, 2.0]
- * 3. Rapid Penalty (連打ペナルティ): 30秒50回で0.1倍
+ * 1. Base Weight (発言力配分): w(n) = 1 / n
+ *    → どんなにいいねしても総発言力は一定（ゼロサム設計）
+ *    → 1回いいね: 1.0 × 1 = 1.0
+ *    → 10回いいね: 0.1 × 10 = 1.0
+ * 2. CR Multiplier (文化度): アンボンド
+ *    → 文化的価値の高いユーザーは総発言力が大きい
+ * 3. Rapid Decay (連打逓減): rapidMultiplier = 1 / (1 + β(n-1))
+ *    → 30秒内の連打を抑制
  *
- * Final Voting Power = baseWeight × crMultiplier × rapidPenalty
+ * Final Voting Power = baseWeight × crMultiplier × rapidMultiplier
+ * Total Daily Voting Power = CR × 1.0 (一定)
  */
 
 import type { CRConfig } from '../types'
 import { getCRMultiplier } from './reputation'
 import { DEFAULT_PARAMS } from '../types'
+import { LIKE_DECAY_DEFAULTS } from './defaults'
 
 export interface VotingPowerInput {
   /** 24時間内のいいね回数 */
@@ -20,26 +27,24 @@ export interface VotingPowerInput {
   curatorReputation: number
   /** 30秒内のいいね回数 (optional) */
   recentLikeCount30s?: number
-  /** 逓減係数α (default: 0.05) */
-  alpha?: number
-  /** 連打判定閾値 (default: 50) */
-  rapidPenaltyThreshold?: number
-  /** 連打ペナルティ乗数 (default: 0.1) */
-  rapidPenaltyMultiplier?: number
+  /** 連打逓減係数β (default: 0.1) */
+  rapidDecayBeta?: number
+  /** 連打ペナルティ最小値 (default: 0.01) */
+  rapidPenaltyMin?: number
   /** CR設定 (optional) */
   crConfig?: CRConfig
 }
 
 export interface VotingPowerOutput {
-  /** 最終投票力 (0.0～2.0) */
+  /** 最終投票力（アンボンド: 上限なし） */
   votingPower: number
-  /** 投票力パーセント表示 (0～200%) */
+  /** 投票力パーセント表示 */
   votingPowerPercent: number
   /** ベース重み (日次逓減後) */
   baseWeight: number
-  /** CR倍率 (0.5～2.0) */
+  /** CR倍率（アンボンド: CR値をそのまま使用） */
   crMultiplier: number
-  /** 連打ペナルティ乗数 (0.1～1.0) */
+  /** 連打ペナルティ乗数 */
   rapidPenaltyMultiplier: number
   /** 連打判定 */
   isRapid: boolean
@@ -56,24 +61,31 @@ export interface VotingPowerOutput {
 
 /**
  * Calculate voting power based on CR and daily activity
+ *
+ * ゼロサム設計: どんなにいいねしても総発言力は一定
+ * baseWeight = 1/n により、n回いいねの総発言力 = n × (1/n) = 1.0
+ *
+ * 連打ペナルティは逓減式: rapidMultiplier = max(min, 1 / (1 + β(n-1)))
  */
 export function calculateVotingPower(input: VotingPowerInput): VotingPowerOutput {
   const n = Math.max(1, input.likeWindowCount)
-  const rawAlpha = input.alpha ?? DEFAULT_PARAMS.likeDecayAlpha
-  const alpha = Math.max(0.0, Math.min(1.0, rawAlpha))
 
-  // Base weight from daily decay
-  const baseWeight = 1 / (1 + alpha * (n - 1))
+  // Base weight: ゼロサム設計（総発言力一定）
+  // w(n) = 1/n → 総発言力 = n × (1/n) = 1.0
+  const baseWeight = 1 / n
 
-  // CR multiplier
+  // CR multiplier (アンボンド)
   const crMultiplier = getCRMultiplier(input.curatorReputation, input.crConfig)
 
-  // Rapid penalty
+  // Rapid decay (逓減式、バイナリではない)
   const recentLikeCount30s = input.recentLikeCount30s ?? 0
-  const rapidThreshold = input.rapidPenaltyThreshold ?? DEFAULT_PARAMS.rapidPenaltyThreshold
-  const rapidPenalty = input.rapidPenaltyMultiplier ?? DEFAULT_PARAMS.rapidPenaltyMultiplier
-  const isRapid = recentLikeCount30s >= rapidThreshold
-  const rapidMultiplier = isRapid ? rapidPenalty : 1.0
+  const beta = input.rapidDecayBeta ?? LIKE_DECAY_DEFAULTS.rapidDecayBeta
+  const rapidMin = input.rapidPenaltyMin ?? LIKE_DECAY_DEFAULTS.rapidPenaltyMin
+  // 逓減式: rapidMultiplier = 1 / (1 + β(n-1))
+  const rawRapidMultiplier = 1 / (1 + beta * Math.max(0, recentLikeCount30s - 1))
+  const rapidMultiplier = Math.max(rapidMin, rawRapidMultiplier)
+  // 連打判定は逓減が大きい場合(50%以下)
+  const isRapid = rapidMultiplier < 0.5
 
   // Final voting power
   const votingPower = baseWeight * crMultiplier * rapidMultiplier
@@ -153,25 +165,15 @@ export function predictNextVotingPower(
 }
 
 /**
- * CR Multiplier table for reference (actual computed values)
+ * CR Level reference
  *
- * Formula: x = log10(CR/0.1) / log10(100), CRm = 0.1 + 9.9 * x
- * Range: [0.1, 10.0]
+ * CR値は上限なし（アンボンド設計）
+ * クラスタ正規化によりゼロサム発言権を実現
  *
- * | CR    | Multiplier | Level     |
- * |-------|------------|-----------|
- * | 0.1   | 0.10x      | explorer  |
- * | 0.5   | 3.56x      | finder    |
- * | 1.0   | 5.05x      | finder    |
- * | 2.0   | 6.54x      | curator   |
- * | 5.0   | 8.52x      | archiver  |
- * | 10.0  | 10.00x     | archiver  |
+ * | CR Range  | Level     | Description          |
+ * |-----------|-----------|----------------------|
+ * | < 0.5     | explorer  | 探索者               |
+ * | 0.5-2.0   | finder    | 発見者               |
+ * | 2.0-5.0   | curator   | 目利き               |
+ * | >= 5.0    | archiver  | 継承者               |
  */
-export const CR_MULTIPLIER_TABLE = [
-  { cr: 0.1, multiplier: 0.1, level: 'explorer' },
-  { cr: 0.5, multiplier: 3.56, level: 'finder' },
-  { cr: 1.0, multiplier: 5.05, level: 'finder' },
-  { cr: 2.0, multiplier: 6.54, level: 'curator' },
-  { cr: 5.0, multiplier: 8.52, level: 'archiver' },
-  { cr: 10.0, multiplier: 10.0, level: 'archiver' }
-] as const

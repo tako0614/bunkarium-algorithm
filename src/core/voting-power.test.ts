@@ -5,8 +5,7 @@ import { describe, it, expect } from 'vitest'
 import {
   calculateVotingPower,
   getVotingPowerExplanation,
-  predictNextVotingPower,
-  CR_MULTIPLIER_TABLE
+  predictNextVotingPower
 } from './voting-power'
 
 describe('calculateVotingPower', () => {
@@ -17,26 +16,26 @@ describe('calculateVotingPower', () => {
         curatorReputation: 1.0
       })
 
-      // CR=1.0 maps to CRm=5.05 (log scale: x = log10(10)/2 = 0.5, CRm = 0.1 + 9.9*0.5 = 5.05)
-      expect(result.votingPower).toBeCloseTo(5.05, 2)
-      expect(result.votingPowerPercent).toBe(505)
+      // CR is now used directly (unbounded CR design)
+      // votingPower = baseWeight × crMultiplier = 1.0 × 1.0 = 1.0
+      expect(result.votingPower).toBeCloseTo(1.0, 2)
+      expect(result.votingPowerPercent).toBe(100)
       expect(result.baseWeight).toBeCloseTo(1.0, 2)
-      expect(result.crMultiplier).toBeCloseTo(5.05, 2)
+      expect(result.crMultiplier).toBeCloseTo(1.0, 2)
       expect(result.isRapid).toBe(false)
     })
 
-    it('applies daily decay for multiple likes', () => {
+    it('applies zero-sum distribution for multiple likes', () => {
       const result = calculateVotingPower({
-        likeWindowCount: 21,
-        curatorReputation: 1.0,
-        alpha: 0.05
+        likeWindowCount: 20,
+        curatorReputation: 1.0
       })
 
-      // w = 1 / (1 + 0.05 * (21-1)) = 1 / (1 + 1) = 0.5
-      // votingPower = 0.5 * 5.05 = 2.525
-      expect(result.baseWeight).toBeCloseTo(0.5, 2)
-      expect(result.votingPower).toBeCloseTo(2.525, 2)
-      expect(result.votingPowerPercent).toBe(253)
+      // ゼロサム設計: w = 1/n = 1/20 = 0.05
+      // 総発言力 = 20 × 0.05 = 1.0 (一定)
+      expect(result.baseWeight).toBeCloseTo(0.05, 2)
+      expect(result.votingPower).toBeCloseTo(0.05, 2)
+      expect(result.votingPowerPercent).toBe(5)
     })
 
     it('treats n < 1 as n = 1', () => {
@@ -49,28 +48,27 @@ describe('calculateVotingPower', () => {
       expect(result.breakdown.dailyLikeCount).toBe(1)
     })
 
-    it('clamps alpha to [0, 1]', () => {
-      const resultHighAlpha = calculateVotingPower({
-        likeWindowCount: 5,
-        curatorReputation: 1.0,
-        alpha: 1.5 // Should be clamped to 1.0
-      })
+    it('maintains constant total voting power (zero-sum)', () => {
+      // ゼロサム設計: いいね回数に関わらず総発言力は一定
+      const testCases = [1, 5, 10, 50, 100]
 
-      const resultNegativeAlpha = calculateVotingPower({
-        likeWindowCount: 5,
-        curatorReputation: 1.0,
-        alpha: -0.5 // Should be clamped to 0.0
-      })
+      for (const n of testCases) {
+        const result = calculateVotingPower({
+          likeWindowCount: n,
+          curatorReputation: 1.0
+        })
 
-      // With alpha=1.0: w = 1 / (1 + 1 * 4) = 0.2
-      expect(resultHighAlpha.baseWeight).toBeCloseTo(0.2, 2)
-
-      // With alpha=0.0: w = 1 / (1 + 0 * 4) = 1.0
-      expect(resultNegativeAlpha.baseWeight).toBeCloseTo(1.0, 2)
+        // 各いいねの重み × いいね回数 = 総発言力 = 1.0
+        const totalVotingPower = result.baseWeight * n
+        expect(totalVotingPower).toBeCloseTo(1.0, 5)
+      }
     })
   })
 
   describe('CR multiplier', () => {
+    // Note: In the new unbounded CR design, CR is used directly as the multiplier
+    // This is balanced by cluster normalization at the application level
+
     it('applies 0.1x for explorer (CR=0.1)', () => {
       const result = calculateVotingPower({
         likeWindowCount: 1,
@@ -88,47 +86,63 @@ describe('calculateVotingPower', () => {
         curatorReputation: 10.0
       })
 
+      // CR is used directly (unbounded design)
       expect(result.crMultiplier).toBeCloseTo(10.0, 1)
       expect(result.votingPower).toBeCloseTo(10.0, 1)
       expect(result.votingPowerPercent).toBe(1000)
       expect(result.breakdown.crLevel).toBe('archiver')
     })
 
-    it('applies 5.05x for finder (CR=1.0)', () => {
+    it('applies 1.0x for finder (CR=1.0)', () => {
       const result = calculateVotingPower({
         likeWindowCount: 1,
         curatorReputation: 1.0
       })
 
-      // CR=1.0: x = log10(10)/2 = 0.5, CRm = 0.1 + 9.9*0.5 = 5.05
-      expect(result.crMultiplier).toBeCloseTo(5.05, 2)
+      // CR is used directly (no logarithmic scaling)
+      expect(result.crMultiplier).toBeCloseTo(1.0, 2)
       expect(result.breakdown.crLevel).toBe('finder')
     })
 
-    it('applies ~6.5x for curator (CR=2.0)', () => {
+    it('applies 2.0x for curator (CR=2.0)', () => {
       const result = calculateVotingPower({
         likeWindowCount: 1,
         curatorReputation: 2.0
       })
 
-      // CR=2.0: x = log10(20)/2 ≈ 0.65, CRm ≈ 6.5
-      expect(result.crMultiplier).toBeGreaterThan(6.4)
-      expect(result.crMultiplier).toBeLessThan(6.6)
+      // CR is used directly (no logarithmic scaling)
+      expect(result.crMultiplier).toBeCloseTo(2.0, 2)
       expect(result.breakdown.crLevel).toBe('curator')
     })
 
-    it('combines CR multiplier with daily decay', () => {
+    it('combines CR multiplier with zero-sum base weight', () => {
       const result = calculateVotingPower({
-        likeWindowCount: 21,
-        curatorReputation: 10.0,
-        alpha: 0.05
+        likeWindowCount: 20,
+        curatorReputation: 10.0
       })
 
-      // baseWeight = 0.5, crMultiplier = 10.0
-      // votingPower = 0.5 * 10.0 = 5.0
-      expect(result.baseWeight).toBeCloseTo(0.5, 2)
+      // baseWeight = 1/20 = 0.05, crMultiplier = 10.0
+      // votingPower = 0.05 * 10.0 = 0.5
+      // 総発言力 = 20 × 0.5 = 10.0 (= CR)
+      expect(result.baseWeight).toBeCloseTo(0.05, 2)
       expect(result.crMultiplier).toBeCloseTo(10.0, 1)
-      expect(result.votingPower).toBeCloseTo(5.0, 1)
+      expect(result.votingPower).toBeCloseTo(0.5, 1)
+    })
+
+    it('total voting power equals CR regardless of like count', () => {
+      // CR=5.0のユーザーは何回いいねしても総発言力は5.0
+      const testCases = [1, 10, 50]
+      const cr = 5.0
+
+      for (const n of testCases) {
+        const result = calculateVotingPower({
+          likeWindowCount: n,
+          curatorReputation: cr
+        })
+
+        const totalVotingPower = result.votingPower * n
+        expect(totalVotingPower).toBeCloseTo(cr, 3)
+      }
     })
   })
 
@@ -176,32 +190,32 @@ describe('calculateVotingPower', () => {
     })
   })
 
-  describe('rapid penalty', () => {
-    it('applies 0.1x penalty when rapid threshold exceeded', () => {
+  describe('rapid penalty (逓減式)', () => {
+    // 逓減式: rapidMultiplier = 1 / (1 + β(n-1))
+    // β = 0.1 (default), isRapid = rapidMultiplier < 0.5
+
+    it('applies diminishing penalty for many rapid likes', () => {
       const result = calculateVotingPower({
         likeWindowCount: 1,
         curatorReputation: 1.0,
-        recentLikeCount30s: 50,
-        rapidPenaltyThreshold: 50,
-        rapidPenaltyMultiplier: 0.1
+        recentLikeCount30s: 50
       })
 
+      // rapidMultiplier = 1 / (1 + 0.1 * 49) = 1/5.9 ≈ 0.169
       expect(result.isRapid).toBe(true)
-      expect(result.rapidPenaltyMultiplier).toBe(0.1)
-      // votingPower = 1.0 (baseWeight) * 5.05 (CR) * 0.1 (rapid) = 0.505
-      expect(result.votingPower).toBeCloseTo(0.505, 2)
+      expect(result.rapidPenaltyMultiplier).toBeCloseTo(0.169, 2)
     })
 
-    it('does not apply penalty below threshold', () => {
+    it('moderate penalty for fewer rapid likes', () => {
       const result = calculateVotingPower({
         likeWindowCount: 1,
         curatorReputation: 1.0,
-        recentLikeCount30s: 49,
-        rapidPenaltyThreshold: 50
+        recentLikeCount30s: 6  // 逓減式: 1/(1+0.1*5) = 1/1.5 ≈ 0.67
       })
 
+      // rapidMultiplier ≈ 0.67 > 0.5 なので isRapid = false
       expect(result.isRapid).toBe(false)
-      expect(result.rapidPenaltyMultiplier).toBe(1.0)
+      expect(result.rapidPenaltyMultiplier).toBeCloseTo(0.67, 2)
     })
 
     it('treats undefined recentLikeCount30s as no rapid', () => {
@@ -214,23 +228,21 @@ describe('calculateVotingPower', () => {
       expect(result.rapidPenaltyMultiplier).toBe(1.0)
     })
 
-    it('combines all multipliers: decay × CR × rapid', () => {
+    it('combines all multipliers: base × CR × rapid', () => {
       const result = calculateVotingPower({
-        likeWindowCount: 21,
+        likeWindowCount: 20,
         curatorReputation: 10.0,
-        recentLikeCount30s: 50,
-        alpha: 0.05,
-        rapidPenaltyThreshold: 50,
-        rapidPenaltyMultiplier: 0.1
+        recentLikeCount30s: 50
       })
 
-      // baseWeight = 0.5, crMultiplier = 10.0, rapidMultiplier = 0.1
-      // votingPower = 0.5 * 10.0 * 0.1 = 0.5
-      expect(result.baseWeight).toBeCloseTo(0.5, 2)
+      // baseWeight = 1/20 = 0.05
+      // crMultiplier = 10.0 (direct)
+      // rapidMultiplier = 1 / (1 + 0.1 * 49) ≈ 0.169
+      // votingPower = 0.05 * 10.0 * 0.169 ≈ 0.085
+      expect(result.baseWeight).toBeCloseTo(0.05, 2)
       expect(result.crMultiplier).toBeCloseTo(10.0, 1)
-      expect(result.rapidPenaltyMultiplier).toBe(0.1)
-      expect(result.votingPower).toBeCloseTo(0.5, 1)
-      expect(result.votingPowerPercent).toBe(50)
+      expect(result.rapidPenaltyMultiplier).toBeCloseTo(0.169, 2)
+      expect(result.votingPower).toBeCloseTo(0.085, 2)
     })
   })
 
@@ -347,64 +359,41 @@ describe('predictNextVotingPower', () => {
   })
 })
 
-describe('CR_MULTIPLIER_TABLE', () => {
-  it('exports reference table', () => {
-    expect(CR_MULTIPLIER_TABLE).toBeInstanceOf(Array)
-    expect(CR_MULTIPLIER_TABLE.length).toBe(6)
-  })
-
-  it('has correct structure', () => {
-    for (const entry of CR_MULTIPLIER_TABLE) {
-      expect(entry).toHaveProperty('cr')
-      expect(entry).toHaveProperty('multiplier')
-      expect(entry).toHaveProperty('level')
-    }
-  })
-
-  it('has expected values', () => {
-    const table = CR_MULTIPLIER_TABLE
-
-    expect(table[0]).toEqual({ cr: 0.1, multiplier: 0.1, level: 'explorer' })
-    expect(table[1]).toEqual({ cr: 0.5, multiplier: 3.56, level: 'finder' })
-    expect(table[2]).toEqual({ cr: 1.0, multiplier: 5.05, level: 'finder' })
-    expect(table[3]).toEqual({ cr: 2.0, multiplier: 6.54, level: 'curator' })
-    expect(table[4]).toEqual({ cr: 5.0, multiplier: 8.52, level: 'archiver' })
-    expect(table[5]).toEqual({ cr: 10.0, multiplier: 10.0, level: 'archiver' })
-  })
-})
-
 describe('edge cases', () => {
-  it('handles very high like count', () => {
+  it('handles very high like count with zero-sum', () => {
     const result = calculateVotingPower({
       likeWindowCount: 1000,
-      curatorReputation: 1.0,
-      alpha: 0.05
+      curatorReputation: 1.0
     })
 
-    // w = 1 / (1 + 0.05 * 999) ≈ 0.0196
-    expect(result.baseWeight).toBeGreaterThan(0)
-    expect(result.baseWeight).toBeLessThan(0.03)
+    // w = 1/1000 = 0.001
+    // 総発言力 = 1000 × 0.001 = 1.0 (一定)
+    expect(result.baseWeight).toBeCloseTo(0.001, 4)
+    const totalVotingPower = result.baseWeight * 1000
+    expect(totalVotingPower).toBeCloseTo(1.0, 5)
   })
 
   it('handles very low CR', () => {
     const result = calculateVotingPower({
       likeWindowCount: 1,
-      curatorReputation: 0.01 // Below minCR
+      curatorReputation: 0.01
     })
 
-    // Should still produce a valid result (clamped to minCR=0.1, which gives CRm=0.1)
-    expect(result.crMultiplier).toBeGreaterThanOrEqual(0.1)
-    expect(result.crMultiplier).toBeLessThanOrEqual(0.2)
+    // CR is now used directly without artificial limits
+    // Very low CR should still produce a valid, positive result
+    expect(result.crMultiplier).toBeGreaterThan(0)
+    expect(result.crMultiplier).toBeCloseTo(0.01, 3)
   })
 
   it('handles very high CR', () => {
     const result = calculateVotingPower({
       likeWindowCount: 1,
-      curatorReputation: 100 // Above maxCR
+      curatorReputation: 100
     })
 
-    // Should be clamped to maxCR, which gives CRm=10.0
-    expect(result.crMultiplier).toBeLessThanOrEqual(10.0)
+    // CR is now unbounded - high CR users have proportionally higher voting power
+    // This is balanced by cluster normalization at the application level
+    expect(result.crMultiplier).toBeCloseTo(100, 1)
   })
 
   it('produces consistent results for same input', () => {

@@ -251,13 +251,16 @@ export function buildDPPKernel(
   const n = items.length
   const L: number[][] = Array(n).fill(null).map(() => Array(n).fill(0))
 
-  // Guard: clamp qualityWeight to reasonable range (computed once)
-  const safeQW = Math.max(0, Math.min(10, config.qualityWeight))
+  // アンボンド: qualityWeightの上限制限を削除（負の値のみ防止）
+  const safeQW = Math.max(0, config.qualityWeight)
 
   // Pre-compute quality scores for all items (optimization)
   const qualityScores: number[] = items.map(item => {
     const score = Math.max(1e-10, item.score)
-    return Math.pow(score, safeQW)
+    // 数値オーバーフロー防止: 大きすぎる指数は制限
+    const safeScore = Math.min(score, 1e6)
+    const safePower = Math.min(safeQW, 100)
+    return Math.pow(safeScore, safePower)
   })
 
   // Build symmetric matrix - only compute upper triangle

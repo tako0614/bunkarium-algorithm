@@ -36,12 +36,13 @@ describe('scoring', () => {
 
       const cvs = calculateCVS(components)
 
-      // Expected: 0.40*0.8 + 0.25*0.6 + 0.20*0.4 + 0.10*0.2 + 0.05*0.3
-      //         = 0.32 + 0.15 + 0.08 + 0.02 + 0.015 = 0.585
-      expect(cvs).toBeCloseTo(0.585, 3)
+      // Expected: 0.35*0.8 + 0.25*0.6 + 0.15*0.4 + 0.15*0.2 + 0.10*0.3
+      //         = 0.28 + 0.15 + 0.06 + 0.03 + 0.03 = 0.55
+      expect(cvs).toBeCloseTo(0.55, 3)
     })
 
-    test('clamps CVS to [0, 1]', () => {
+    test('CVS is unbounded (no clamp to 1)', () => {
+      // アンボンド設計: CVSに上限なし
       const highComponents = {
         like: 2.0,
         context: 2.0,
@@ -51,7 +52,8 @@ describe('scoring', () => {
       }
 
       const cvs = calculateCVS(highComponents)
-      expect(cvs).toBe(1.0)
+      // 0.35*2 + 0.25*2 + 0.15*2 + 0.15*2 + 0.10*2 = 2.0
+      expect(cvs).toBe(2.0)
     })
 
     test('handles zero components', () => {
@@ -116,11 +118,11 @@ describe('scoring', () => {
 
       expect(result.breakdown.prs).toBe(0.8)
       expect(result.breakdown.cvs).toBeGreaterThan(0)
-      expect(result.breakdown.dns).toBeGreaterThan(0)
+      expect(result.breakdown.dns).toBe(0)  // Community-First: DNSは常に0
       expect(result.breakdown.penalty).toBe(0)
 
-      // finalScore = 0.55*PRS + 0.25*CVS + 0.20*DNS - penalty
-      const expected = 0.55 * result.breakdown.prs + 0.25 * result.breakdown.cvs + 0.20 * result.breakdown.dns - result.breakdown.penalty
+      // Community-First: finalScore = 0.50*PRS + 0.50*CVS - penalty
+      const expected = 0.50 * result.breakdown.prs + 0.50 * result.breakdown.cvs - result.breakdown.penalty
       expect(result.finalScore).toBeCloseTo(expected, 9)
     })
 

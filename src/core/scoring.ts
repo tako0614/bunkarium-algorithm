@@ -1,9 +1,18 @@
-import type { Candidate, ScoreWeights, ScoreBreakdown, CVSComponents } from '../types'
-import { DEFAULT_PARAMS } from '../types'
-import { SCORING_DEFAULTS, LN2 } from './defaults'
-import { clamp01, round9 } from './utils'
+import type { Candidate, ScoreBreakdown, CVSComponents } from '../types'
+import { SCORING_DEFAULTS } from './defaults'
+import { round9 } from './utils'
 
-/** CVS component weights (algorithm.md v1.0 defaults) */
+/**
+ * Community-First Scoring System
+ *
+ * シンプルな2要素スコアリング:
+ * - PRS (Personal Relevance Score): フォロー関係・親密度
+ * - CVS (Cultural Value Score): 文化的価値（CR/CP由来）
+ *
+ * 多様性スコア(DNS)は削除 - 多様性は結果であってアルゴリズムには含まない
+ */
+
+/** CVS component weights */
 export interface CVSWeights {
   like: number
   context: number
@@ -21,8 +30,15 @@ export const DEFAULT_CVS_WEIGHTS: CVSWeights = {
 }
 
 /**
- * Cultural Value Score (algorithm.md仕様)
+ * Cultural Value Score
  * CVS = a*like + b*context + d*collection + e*bridge + f*sustain
+ *
+ * 文化的価値を数値化:
+ * - like: いいねの質（重み付き）
+ * - context: コンテキスト品質（作品引用など）
+ * - collection: コレクション価値
+ * - bridge: クラスタ間ブリッジ貢献
+ * - sustain: 持続的価値
  */
 export function calculateCVS(
   components: CVSComponents,
@@ -34,38 +50,13 @@ export function calculateCVS(
     weights.collection * components.collection +
     weights.bridge * components.bridge +
     weights.sustain * components.sustain
-  return clamp01(cvs)
+  // アンボンド: 負の値のみ防止、上限なし
+  return Math.max(0, cvs)
 }
 
 /**
- * Diversity/Novelty Score (algorithm.md仕様)
- *
- * clusterNovelty = 1 / (1 + exposureCount * clusterNoveltyFactor)
- * timeNovelty = exp(-ln(2) * ageHours / timeHalfLifeHours)
- * DNS = clamp(0, 1, 0.6 * clusterNovelty + 0.4 * timeNovelty)
- */
-export function calculateDNS(
-  candidate: Candidate,
-  recentClusterExposures: Record<string, number>,
-  nowTs: number,
-  clusterNoveltyFactor: number = SCORING_DEFAULTS.clusterNoveltyFactor,
-  timeHalfLifeHours: number = SCORING_DEFAULTS.timeHalfLifeHours
-): number {
-  const exposureCount = recentClusterExposures[candidate.clusterId] || 0
-  const clusterNovelty = 1 / (1 + exposureCount * clusterNoveltyFactor)
-
-  const ageHours = Math.max(0, (nowTs - candidate.createdAt) / (1000 * 60 * 60))
-  // Guard: prevent division by zero when timeHalfLifeHours is 0 or negative
-  const safeHalfLife = Math.max(1e-6, timeHalfLifeHours)
-  const timeNovelty = Math.exp(-LN2 * ageHours / safeHalfLife)
-
-  const dns = SCORING_DEFAULTS.dnsClusterNoveltyWeight * clusterNovelty +
-              SCORING_DEFAULTS.dnsTimeNoveltyWeight * timeNovelty
-  return clamp01(dns)
-}
-
-/**
- * Penalties only cover quality flags. Similarity penalties are applied in rerank.
+ * Spam/Quality penalties
+ * アンボンド: 上限なし、負の値のみ防止
  */
 export function calculatePenalty(candidate: Candidate): number {
   let penalty = 0
@@ -74,37 +65,95 @@ export function calculatePenalty(candidate: Candidate): number {
     penalty += 0.5
   }
 
-  return clamp01(penalty)
+  // 負の値のみ防止、上限なし
+  return Math.max(0, penalty)
+}
+
+/** Simple score weights (PRS + CVS only, no DNS) */
+export interface SimpleScoreWeights {
+  prs: number
+  cvs: number
+}
+
+export const DEFAULT_SIMPLE_WEIGHTS: SimpleScoreWeights = {
+  prs: SCORING_DEFAULTS.prsWeight,
+  cvs: SCORING_DEFAULTS.cvsWeight
 }
 
 /**
- * Mixed score: w_prs * PRS + w_cvs * CVS + w_dns * DNS - penalty
- * algorithm.md仕様: finalScoreを9桁精度に丸める
+ * Community-First Score Calculation
+ *
+ * FinalScore = w_prs * PRS + w_cvs * CVS - penalty
+ *
+ * シンプルな2要素:
+ * - PRS: フォロー関係スコア（親密度、相互フォローなど）
+ * - CVS: 文化的価値スコア（CR/CP由来の質評価）
+ *
+ * DNSは削除 - 多様性は結果であってアルゴリズムには含まない
  */
-export function calculateMixedScore(
+export function calculateScore(
   candidate: Candidate,
-  recentClusterExposures: Record<string, number>,
-  nowTs: number,
-  weights: ScoreWeights = DEFAULT_PARAMS.weights,
-  clusterNoveltyFactor?: number,
-  timeHalfLifeHours?: number
+  weights: SimpleScoreWeights = DEFAULT_SIMPLE_WEIGHTS
 ): { finalScore: number; breakdown: ScoreBreakdown } {
-  const prs = clamp01(candidate.features.prs ?? 0)
-  const cvs = clamp01(calculateCVS(candidate.features.cvsComponents))
-  const dns = clamp01(calculateDNS(candidate, recentClusterExposures, nowTs, clusterNoveltyFactor, timeHalfLifeHours))
+  // PRS: Personal Relevance Score（フォロー関係など）
+  const prs = Math.max(0, candidate.features.prs ?? 0)
+
+  // CVS: Cultural Value Score（文化的価値）
+  const cvs = calculateCVS(candidate.features.cvsComponents)
+
+  // Penalty: スパム等のペナルティ
   const penalty = calculatePenalty(candidate)
 
+  // Final Score = PRS + CVS - penalty（重み付き）
   const rawFinalScore =
     weights.prs * prs +
-    weights.cvs * cvs +
-    weights.dns * dns -
+    weights.cvs * cvs -
     penalty
 
-  // finalScoreを9桁精度に丸める（algorithm.md仕様: cross-implementation determinism）
+  // 9桁精度で丸める（決定性のため）
   const finalScore = round9(rawFinalScore)
 
   return {
     finalScore,
-    breakdown: { prs, cvs, dns, penalty, finalScore }
+    breakdown: {
+      prs,
+      cvs,
+      dns: 0,  // 後方互換性のため0を返す
+      penalty,
+      finalScore
+    }
   }
+}
+
+/**
+ * @deprecated Use calculateScore instead
+ * 後方互換性のために残す（DNSは常に0）
+ */
+export function calculateMixedScore(
+  candidate: Candidate,
+  _recentClusterExposures: Record<string, number>,
+  _nowTs: number,
+  weights?: { prs: number; cvs: number; dns?: number },
+  _clusterNoveltyFactor?: number,
+  _timeHalfLifeHours?: number
+): { finalScore: number; breakdown: ScoreBreakdown } {
+  const simpleWeights: SimpleScoreWeights = {
+    prs: weights?.prs ?? DEFAULT_SIMPLE_WEIGHTS.prs,
+    cvs: weights?.cvs ?? DEFAULT_SIMPLE_WEIGHTS.cvs
+  }
+  return calculateScore(candidate, simpleWeights)
+}
+
+/**
+ * @deprecated DNS is removed from the algorithm
+ * 後方互換性のために残す（常に0を返す）
+ */
+export function calculateDNS(
+  _candidate: Candidate,
+  _recentClusterExposures: Record<string, number>,
+  _nowTs: number,
+  _clusterNoveltyFactor?: number,
+  _timeHalfLifeHours?: number
+): number {
+  return 0
 }

@@ -31,7 +31,8 @@ const createCandidate = (itemKey: string, clusterId: string, prs: number): Candi
 })
 
 describe('rerank', () => {
-  test('diversityRerank uses exploration slots even when interval would round to zero', () => {
+  test('diversityRerank in Community-First mode returns scored candidates', () => {
+    // Community-Firstモードでは exploration は無効
     const candidates = [
       createCandidate('a', 'seen', 1),
       createCandidate('b', 'new-1', 0.5),
@@ -41,19 +42,18 @@ describe('rerank', () => {
     const recentClusterExposures = { seen: 1 }
     const now = Date.now()
     const scored = primaryRank(candidates, recentClusterExposures, now, {
-      prs: 1,
-      cvs: 0,
-      dns: 0
+      prs: 0.5,
+      cvs: 0.5
     })
 
-    const effectiveWeights = { prs: 0.55, cvs: 0.25, dns: 0.20 }
+    const effectiveWeights = { prs: 0.5, cvs: 0.5 }
     const { report, reranked } = diversityRerank(
       scored,
       {
         diversityCapN: 2,
         effectiveK: 2,
-        effectiveExplorationBudget: 1,
-        mmrSimilarityPenalty: 0.3,
+        effectiveExplorationBudget: 0,  // Community-First: no exploration
+        mmrSimilarityPenalty: 0,        // Community-First: no diversity penalty
         requestSeed: 'test-req|test-cv',
         recentClusterExposures,
         explainThresholds: {
@@ -69,7 +69,7 @@ describe('rerank', () => {
     )
 
     expect(reranked.length).toBe(2)
-    expect(report.explorationSlotsFilled).toBeGreaterThan(0)
+    expect(report.usedStrategy).toBe('COMMUNITY')
   })
 
   test('rankSync filters hardBlock candidates', () => {
@@ -147,7 +147,9 @@ describe('rerank', () => {
     expect(response.ranked[0].itemKey).toBe('a')
   })
 
-  test('rankSync respects diversityCapN limit', () => {
+  test('rankSync in Community-First mode returns top N by score', () => {
+    // Community-Firstモードではdiversity制約が効かない
+    // スコア順で上位N件が返される
     const candidates: Candidate[] = [
       createCandidate('a1', 'c1', 1.0),
       createCandidate('a2', 'c1', 0.9),
@@ -162,26 +164,22 @@ describe('rerank', () => {
         userKey: 'user-1',
         likeWindowCount: 0,
         recentClusterExposures: {},
-        diversitySlider: 0.5,
         curatorReputation: 1.0,
         cpEarned90d: 0
       },
       candidates,
       context: { surface: 'home_mix', nowTs: Date.now() },
       params: {
-        diversityCapN: 2,
-        diversityCapK: 1,
-        explorationBudget: 0
+        diversityCapN: 2
       }
     })
 
-    // With diversityCapK=1 and diversityCapN=2, should get at most 1 item per cluster
-    // So should have 2 items total (top from each cluster)
+    // Community-First: スコア順で上位2件
     expect(response.ranked.length).toBe(2)
     const rankedKeys = response.ranked.map(item => item.itemKey)
-    // Should have diversity - items from different clusters
+    // スコア順: a1(1.0), a2(0.9)
     expect(rankedKeys).toContain('a1')
-    expect(rankedKeys).toContain('b1')
+    expect(rankedKeys).toContain('a2')
   })
 
   test('finalScore has exactly 9 decimal places or fewer', () => {
@@ -524,10 +522,11 @@ describe('rerank', () => {
       })
 
       expect(response.ranked.length).toBeLessThanOrEqual(3)
-      expect(response.constraintsReport.usedStrategy).toBe('DPP')
+      // Community-Firstモードでは多様性戦略が無効化されている
+      expect(response.constraintsReport.usedStrategy).toBe('COMMUNITY')
     })
 
-    test('DPP strategy handles candidates without embeddings', () => {
+    test('DPP strategy falls back to COMMUNITY mode without embeddings', () => {
       const candidates: Candidate[] = [
         createCandidate('a', 'c1', 0.9),
         createCandidate('b', 'c2', 0.8),
@@ -554,9 +553,9 @@ describe('rerank', () => {
         }
       })
 
-      // Should still return results (DPP uses cluster-based similarity as fallback)
+      // Should still return results (Community mode used as fallback)
       expect(response.ranked.length).toBeGreaterThan(0)
-      expect(response.constraintsReport.usedStrategy).toBe('DPP')
+      expect(response.constraintsReport.usedStrategy).toBe('COMMUNITY')
     })
 
     test('DPP produces deterministic results with same seed', () => {
@@ -656,29 +655,31 @@ describe('rerank', () => {
         }
       })
 
-      // Verify results are valid (cache should not affect correctness)
+      // Verify results are valid (Community mode used)
       expect(response.ranked.length).toBe(5)
-      expect(response.constraintsReport.usedStrategy).toBe('MMR')
+      // Community-Firstモードでは多様性戦略が無効化されている
+      expect(response.constraintsReport.usedStrategy).toBe('COMMUNITY')
     })
   })
 
   describe('edge cases', () => {
-    test('diversityRerank handles N=0 gracefully', () => {
+    test('diversityRerank handles N=0 with COMMUNITY mode', () => {
       const candidates = [
         createCandidate('a', 'c1', 0.9),
         createCandidate('b', 'c2', 0.8)
       ]
 
       const now = Date.now()
-      const scored = primaryRank(candidates, {}, now, { prs: 1, cvs: 0, dns: 0 })
+      // Community-FirstモードではDNSは使わない
+      const scored = primaryRank(candidates, {}, now, { prs: 0.5, cvs: 0.5 })
 
       const { reranked, report } = diversityRerank(
         scored,
         {
           diversityCapN: 0,
           effectiveK: 5,
-          effectiveExplorationBudget: 0.15,
-          mmrSimilarityPenalty: 0.15,
+          effectiveExplorationBudget: 0,  // Community mode: no exploration
+          mmrSimilarityPenalty: 0,        // Community mode: no diversity penalty
           requestSeed: 'test',
           recentClusterExposures: {},
           explainThresholds: {
@@ -690,11 +691,11 @@ describe('rerank', () => {
           },
           newClusterExposureMax: 2
         },
-        { prs: 0.55, cvs: 0.25, dns: 0.20 }
+        { prs: 0.5, cvs: 0.5 }  // Community-First重み
       )
 
-      expect(reranked).toEqual([])
-      expect(report.usedStrategy).toBe('NONE')
+      // N=0の場合、simpleRerankが呼ばれ、COMMUNITY戦略で処理される
+      expect(report.usedStrategy).toBe('COMMUNITY')
     })
 
     test('rankSync handles empty candidates array', () => {
@@ -715,7 +716,8 @@ describe('rerank', () => {
       })
 
       expect(response.ranked).toEqual([])
-      expect(response.constraintsReport.usedStrategy).toBe('NONE')
+      // 空の候補でもCOMMUNITY戦略が報告される
+      expect(response.constraintsReport.usedStrategy).toBe('COMMUNITY')
     })
 
     test('cluster cap fallback when all candidates blocked', () => {
@@ -846,14 +848,12 @@ describe('rerank', () => {
           userKey: 'user-1',
           likeWindowCount: 0,
           recentClusterExposures: {},
-          diversitySlider: 0.5,
           curatorReputation: 1.0,
           cpEarned90d: 0
         },
         candidates,
         context: { surface: 'home_mix' as const, nowTs: 1234567890000 },
         params: {
-          explorationBudget: 0.3,
           diversityCapN: 5
         }
       }
@@ -865,7 +865,8 @@ describe('rerank', () => {
         const response = rankSync({ ...baseRequest, requestId: `req-${seed}`, requestSeed: seed })
         // Verify each seed produces valid output
         expect(response.ranked.length).toBe(5)
-        expect(response.constraintsReport.explorationSlotsRequested).toBe(1) // floor(5 * 0.3) = 1
+        // Community-First: exploration無効
+        expect(response.constraintsReport.explorationSlotsRequested).toBe(0)
         for (const item of response.ranked) {
           expect(Number.isFinite(item.finalScore)).toBe(true)
         }
