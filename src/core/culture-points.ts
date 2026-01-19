@@ -3,6 +3,11 @@
 import { CULTURE_POINTS_DEFAULTS } from './defaults'
 
 export type CPEventType =
+  // Daily activity rewards (new)
+  | 'mint_post_created'           // User creates a post
+  | 'mint_like_received'          // User's content receives a like (weighted by liker's CR)
+  | 'mint_engagement_bonus'       // Bonus for sustained quality engagement
+  // Existing adoption-based rewards
   | 'mint_note_adopted'
   | 'mint_note_referenced'
   | 'mint_collection_adopted'
@@ -11,13 +16,17 @@ export type CPEventType =
   | 'mint_archive_contribution'
   | 'mint_quality_edit'
   | 'mint_community_reward'
+  // Burning/spending
   | 'burn_editorial_application'
   | 'burn_feature_unlock'
+  // Staking
   | 'lock_stake_recommendation'
   | 'unlock_stake_success'
   | 'unlock_stake_expired'
+  // Penalties
   | 'slash_fraud_detected'
   | 'slash_stake_failure'
+  | 'slash_inactivity'            // CR decay due to inactivity (new)
 
 export interface CPLedgerEntry {
   id: string
@@ -66,6 +75,11 @@ export interface StakeOutcome {
 
 export interface CPIssuanceConfig {
   baseAmounts: {
+    // Daily activity rewards
+    postCreated: number         // Base CP for creating a post
+    likeReceived: number        // Base CP for receiving a like
+    engagementBonus: number     // Bonus for sustained quality engagement
+    // Adoption-based rewards
     noteAdopted: number
     noteReferenced: number
     collectionAdopted: number
@@ -78,7 +92,7 @@ export interface CPIssuanceConfig {
   diminishing: {
     windowHours: number
     rate: number
-    minMultiplier: number
+    minMultiplier?: number      // Optional: if undefined, no floor (can approach 0)
   }
   stake: {
     defaultLockDays: number
@@ -86,11 +100,23 @@ export interface CPIssuanceConfig {
     successBonusRate: number
     failureSlashRate: number
     successThreshold: number
+    // Stake outcome evaluation weights (contribution to total score)
+    outcomeWeights: {
+      supportDensity: number  // Weight for support density improvement
+      breadth: number         // Weight for breadth increase
+      context: number         // Weight for context count increase
+      crossCluster: number    // Weight for cross-cluster reactions
+    }
   }
 }
 
 export const DEFAULT_CP_CONFIG: CPIssuanceConfig = {
   baseAmounts: {
+    // Daily activity rewards (new - enabling CP flow from regular activity)
+    postCreated: 1,             // Small CP for posting (encourages creation)
+    likeReceived: 0.5,          // CP when content receives a like (quality signal)
+    engagementBonus: 5,         // Bonus for sustained quality engagement
+    // Adoption-based rewards (existing)
     noteAdopted: 10,
     noteReferenced: 5,
     collectionAdopted: 15,
@@ -102,15 +128,22 @@ export const DEFAULT_CP_CONFIG: CPIssuanceConfig = {
   },
   diminishing: {
     windowHours: 24,
-    rate: 0.05,  // algorithm.md v1.0 spec: 0.05
-    minMultiplier: 0.2
+    rate: 0.1,                  // Increased from 0.05 for faster diminishing
+    minMultiplier: undefined    // No floor - can diminish to near-zero
   },
   stake: {
     defaultLockDays: 14,
     minStakeAmount: 50,
     successBonusRate: 0.2,
     failureSlashRate: 0.3,
-    successThreshold: 0.5
+    successThreshold: 0.5,
+    // Stake outcome evaluation weights (equal weighting by default)
+    outcomeWeights: {
+      supportDensity: 0.25,
+      breadth: 0.25,
+      context: 0.25,
+      crossCluster: 0.25
+    }
   }
 }
 
@@ -118,7 +151,7 @@ export const DEFAULT_CP_CONFIG: CPIssuanceConfig = {
 export function calculateCPDiminishingMultiplier(
   n: number,
   rate: number,
-  minMultiplier: number
+  minMultiplier?: number
 ): number
 export function calculateCPDiminishingMultiplier(
   recentEventCount: number,
@@ -130,11 +163,12 @@ export function calculateCPDiminishingMultiplier(
   rateOrConfig?: number | CPIssuanceConfig,
   minMultiplier?: number
 ): number {
-  // Spec-compliant signature: (n: number, rate: number, minMultiplier: number)
-  if (typeof rateOrConfig === 'number' && minMultiplier !== undefined) {
+  // Spec-compliant signature: (n: number, rate: number, minMultiplier?: number)
+  if (typeof rateOrConfig === 'number') {
     const safeCount = Math.max(1, Math.floor(n))
     const multiplier = 1 / (1 + rateOrConfig * (safeCount - 1))
-    return Math.max(minMultiplier, multiplier)
+    // If minMultiplier is provided, apply it; otherwise no floor
+    return minMultiplier !== undefined ? Math.max(minMultiplier, multiplier) : multiplier
   }
 
   // Backward-compatible signature: (recentEventCount: number, config?: CPIssuanceConfig)
@@ -142,7 +176,8 @@ export function calculateCPDiminishingMultiplier(
   const { rate, minMultiplier: min } = config.diminishing
   const safeCount = Math.max(1, Math.floor(n))
   const multiplier = 1 / (1 + rate * (safeCount - 1))
-  return Math.max(min, multiplier)
+  // If minMultiplier is defined in config, apply it; otherwise no floor
+  return min !== undefined ? Math.max(min, multiplier) : multiplier
 }
 
 export function calculateCPIssuance(
@@ -159,6 +194,17 @@ export function calculateCPIssuance(
 } {
   let baseAmount = 0
   switch (eventType) {
+    // Daily activity rewards (new)
+    case 'mint_post_created':
+      baseAmount = config.baseAmounts.postCreated
+      break
+    case 'mint_like_received':
+      baseAmount = config.baseAmounts.likeReceived
+      break
+    case 'mint_engagement_bonus':
+      baseAmount = config.baseAmounts.engagementBonus
+      break
+    // Existing adoption-based rewards
     case 'mint_note_adopted':
       baseAmount = config.baseAmounts.noteAdopted
       break
@@ -188,9 +234,9 @@ export function calculateCPIssuance(
   }
 
   const diminishingMultiplier = calculateCPDiminishingMultiplier(recentEventCount, config)
-  const { min: crMin, max: crMax } = CULTURE_POINTS_DEFAULTS.issuanceCRMultiplier
-  const safeCrMultiplier = Math.max(crMin, Math.min(crMax, crMultiplier))
-  const amount = Math.round(baseAmount * diminishingMultiplier * safeCrMultiplier)
+  // CR multiplier now has no limits - use directly
+  const safeCrMultiplier = Math.max(0.001, crMultiplier)
+  const amount = baseAmount * diminishingMultiplier * safeCrMultiplier
 
   return {
     amount,
@@ -361,6 +407,7 @@ export function evaluateStakeOutcome(
   },
   config: CPIssuanceConfig = DEFAULT_CP_CONFIG
 ): StakeOutcome {
+  // Calculate raw improvements (no artificial clamping)
   const supportDensityImprovement = metrics.supportDensityBefore > 0
     ? (metrics.supportDensityAfter - metrics.supportDensityBefore) / metrics.supportDensityBefore
     : metrics.supportDensityAfter > 0 ? 1 : 0
@@ -369,22 +416,33 @@ export function evaluateStakeOutcome(
   const contextIncrease = metrics.contextCountAfter - metrics.contextCountBefore
   const crossClusterReactions = metrics.crossClusterReactionsAfter - metrics.crossClusterReactionsBefore
 
-  const scores = [
-    Math.min(1, Math.max(0, supportDensityImprovement)),
-    Math.min(1, Math.max(0, breadthIncrease / 3)),
-    Math.min(1, Math.max(0, contextIncrease / 5)),
-    Math.min(1, Math.max(0, crossClusterReactions / 10))
-  ]
+  // Use configurable weights for weighted average
+  // Normalize each improvement using sigmoid-like function: x / (1 + |x|) maps any value to (-1, 1)
+  const normalize = (x: number) => x / (1 + Math.abs(x))
 
-  const totalScore = scores.reduce((a, b) => a + b, 0) / scores.length
+  const weights = config.stake.outcomeWeights
+  const totalWeight = weights.supportDensity + weights.breadth + weights.context + weights.crossCluster
+
+  // Weighted score using normalized improvements (no hardcoded divisors)
+  const totalScore = totalWeight > 0
+    ? (
+        weights.supportDensity * normalize(supportDensityImprovement) +
+        weights.breadth * normalize(breadthIncrease) +
+        weights.context * normalize(contextIncrease) +
+        weights.crossCluster * normalize(crossClusterReactions)
+      ) / totalWeight
+    : 0
+
+  // Map from (-1, 1) to (0, 1) range for success threshold comparison
+  const normalizedScore = (totalScore + 1) / 2
 
   return {
     supportDensityImprovement,
     breadthIncrease,
     contextIncrease,
     crossClusterReactions,
-    totalScore,
-    isSuccess: totalScore >= config.stake.successThreshold
+    totalScore: normalizedScore,
+    isSuccess: normalizedScore >= config.stake.successThreshold
   }
 }
 

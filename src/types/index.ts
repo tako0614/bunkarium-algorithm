@@ -119,24 +119,24 @@ export const DEFAULT_SURFACE_POLICIES: Record<SurfaceId, SurfacePolicy> = {
 }
 
 
-/** デフォルトパラメータ */
+/** デフォルトパラメータ (Community Mode: コミュニティ中心) */
 export const DEFAULT_PARAMS: AlgorithmParams = {
   likeWindowMs: 24 * 60 * 60 * 1000, // 24h
   likeDecayAlpha: 0.05,
-  rapidPenaltyThreshold: 50,
-  rapidPenaltyMultiplier: 0.1,
+  rapidPenaltyThreshold: 50,  // 逓減式では参考値のみ
+  rapidPenaltyMultiplier: 0.01,  // 逓減式の最小値
   publicMetrics: { ...DEFAULT_PUBLIC_METRICS_PARAMS },
-  variantId: 'default',
+  variantId: 'community',  // Community Mode
   surfacePolicies: { ...DEFAULT_SURFACE_POLICIES },
   diversityCapN: 20,
-  diversityCapK: 5,
-  explorationBudget: 0.15,
+  diversityCapK: 1000,  // Community Mode: 実質無制限
+  explorationBudget: 0.00,  // Community Mode: 探索なし
   rerankMaxCandidates: 200,
   rerankMinCandidatesPerCluster: 1,
-  weights: { prs: 0.55, cvs: 0.25, dns: 0.20 },
+  weights: { prs: 0.70, cvs: 0.30, dns: 0.00 },  // Community Mode: DNS=0
   clusterNoveltyFactor: 0.06,
   timeHalfLifeHours: 72,
-  mmrSimilarityPenalty: 0.15,
+  mmrSimilarityPenalty: 0.00,  // Community Mode: 類似度ペナルティなし
   rerankStrategy: 'MMR',
   explainThresholds: { ...DEFAULT_EXPLAIN_THRESHOLDS }
 }
@@ -367,7 +367,7 @@ export interface ScoreBreakdown {
 
 export interface ConstraintsReport {
   /** 使用した戦略 */
-  usedStrategy: 'MMR' | 'DPP' | 'NONE'
+  usedStrategy: 'MMR' | 'DPP' | 'SLIDING_WINDOW' | 'COMMUNITY' | 'NONE'
   /** クラスタ上限が適用された回数 */
   capAppliedCount: number
   /** 探索枠要求数 */

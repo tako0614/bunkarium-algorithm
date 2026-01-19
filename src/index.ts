@@ -52,6 +52,7 @@ export {
   evaluateBridgeSuccess,
   evaluateNoteSettlement,
   calculateViewWeight,
+  calculateDiscoveryBonus,
   DEFAULT_CR_CONFIG,
   DEFAULT_CR_WEIGHTS,
 
@@ -135,8 +136,7 @@ export {
   // Voting Power
   calculateVotingPower,
   getVotingPowerExplanation,
-  predictNextVotingPower,
-  CR_MULTIPLIER_TABLE
+  predictNextVotingPower
 } from './core'
 
 // Version info
