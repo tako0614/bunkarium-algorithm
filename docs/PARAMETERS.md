@@ -13,25 +13,14 @@ This guide helps you understand and tune algorithm parameters for different use 
 | `rapidPenaltyThreshold` | 50 | 10-100 | Spam threshold |
 | `rapidPenaltyMultiplier` | 0.1 | 0.05-0.5 | Spam penalty |
 | **Scoring Weights** |
-| `weights.prs` | 0.55 | 0.0-1.0 | Personal relevance |
-| `weights.cvs` | 0.25 | 0.0-1.0 | Cultural value |
-| `weights.dns` | 0.20 | 0.0-1.0 | Diversity/novelty |
+| `weights.prs` | 0.70 | 0.0-1.0 | Personal relevance |
+| `weights.cvs` | 0.30 | 0.0-1.0 | Cultural value |
 | **CVS Components** |
 | `cvsComponentWeights.like` | 0.40 | 0.0-1.0 | Like signal |
 | `cvsComponentWeights.context` | 0.25 | 0.0-1.0 | Context signal |
 | `cvsComponentWeights.collection` | 0.20 | 0.0-1.0 | Collection signal |
 | `cvsComponentWeights.bridge` | 0.10 | 0.0-1.0 | Bridge signal |
 | `cvsComponentWeights.sustain` | 0.05 | 0.0-1.0 | Sustain signal |
-| **DNS** |
-| `clusterNoveltyFactor` | 0.06 | 0.01-0.20 | Exposure decay |
-| `timeHalfLifeHours` | 72 | 12-168 | Time novelty |
-| `dnsClusterNoveltyWeight` | 0.6 | 0.0-1.0 | Cluster weight |
-| `dnsTimeNoveltyWeight` | 0.4 | 0.0-1.0 | Time weight |
-| **Diversity** |
-| `diversityCapN` | 20 | 10-50 | Window size |
-| `diversityCapK` | 5 | 2-10 | Cluster cap |
-| `explorationBudget` | 0.15 | 0.0-0.30 | Random sampling |
-| `mmrLambda` | 0.15 | 0.0-1.0 | Relevance vs diversity |
 | **Public Metrics** |
 | `beta` | 1.0 | 0.5-2.0 | Density sensitivity |
 | `priorViews` | 10 | 1-100 | Bayesian prior |
@@ -108,74 +97,26 @@ const params = {
 
 ## Scoring Weight Parameters
 
-### PRS / CVS / DNS Balance
+### PRS / CVS Balance
 
-**Default**: `{ prs: 0.55, cvs: 0.25, dns: 0.20 }`
+**Default**: `{ prs: 0.70, cvs: 0.30 }`
 
 **Must sum to 1.0**.
 
 #### Use Cases
 
-**1. Following-heavy feed** (Twitter-like):
+**1. Following-heavy feed**:
 ```typescript
 const params = {
-  weights: {
-    prs: 0.70, // High personal relevance
-    cvs: 0.20,
-    dns: 0.10  // Low diversity
-  }
+  weights: { prs: 0.80, cvs: 0.20 }
 }
 ```
 
-**2. Discovery feed** (TikTok-like):
+**2. Quality-first feed**:
 ```typescript
 const params = {
-  weights: {
-    prs: 0.20, // Low personal relevance
-    cvs: 0.30,
-    dns: 0.50  // High diversity
-  }
+  weights: { prs: 0.50, cvs: 0.50 }
 }
-```
-
-**3. Balanced home feed**:
-```typescript
-const params = {
-  weights: {
-    prs: 0.45,
-    cvs: 0.35,
-    dns: 0.20
-  }
-}
-```
-
-**4. Quality-first**:
-```typescript
-const params = {
-  weights: {
-    prs: 0.30,
-    cvs: 0.60, // High cultural value
-    dns: 0.10
-  }
-}
-```
-
-#### Dynamic Adjustment
-
-Map user diversity slider (0.0-1.0) to weights:
-
-```typescript
-function getWeights(diversitySlider: number) {
-  const dnsWeight = 0.15 + diversitySlider * 0.20 // 0.15-0.35
-  const prsWeight = 0.60 - diversitySlider * 0.15 // 0.45-0.60
-  const cvsWeight = 0.25 // Fixed
-
-  return { prs: prsWeight, cvs: cvsWeight, dns: dnsWeight }
-}
-
-// Slider at 0.0 (no diversity): { prs: 0.60, cvs: 0.25, dns: 0.15 }
-// Slider at 0.5 (medium):       { prs: 0.525, cvs: 0.25, dns: 0.225 }
-// Slider at 1.0 (max diversity): { prs: 0.45, cvs: 0.25, dns: 0.35 }
 ```
 
 ---
@@ -253,169 +194,6 @@ const cvsComponentWeights = {
   collection: 0.35, // High collection weight
   bridge: 0.10,
   sustain: 0.05
-}
-```
-
----
-
-## DNS Parameters
-
-### Cluster Novelty Factor
-
-Controls how quickly cluster exposure reduces novelty.
-
-**Default**: `0.06`
-
-Formula: `novelty = exp(-k × exposureCount)`
-
-**Effects**:
-- **Lower (0.02-0.04)**: Slower decay
-  - 10 exposures → novelty ≈ 0.67
-  - Use for: Small cluster sets
-- **Higher (0.10-0.15)**: Faster decay
-  - 10 exposures → novelty ≈ 0.22
-  - Use for: Large cluster sets, strict variety
-
-### Time Half-Life Hours
-
-How quickly time novelty decays.
-
-**Default**: `72` (3 days)
-
-**Effects**:
-- **Shorter (24-48)**: Favor very recent content
-  - Use for: News, real-time events
-- **Longer (168-336)**: Tolerate older content
-  - Use for: Evergreen, educational content
-
-**Example**:
-```typescript
-// News feed (fresh content only)
-const params = {
-  timeHalfLifeHours: 24,
-  dnsTimeNoveltyWeight: 0.6 // Emphasize recency
-}
-
-// Evergreen feed
-const params = {
-  timeHalfLifeHours: 168, // 7 days
-  dnsTimeNoveltyWeight: 0.3 // De-emphasize recency
-}
-```
-
-### DNS Component Weights
-
-**Default**: `{ clusterNovelty: 0.6, timeNovelty: 0.4 }`
-
-**Must sum to 1.0**.
-
-**Cluster-focused**:
-```typescript
-const params = {
-  dnsClusterNoveltyWeight: 0.8,
-  dnsTimeNoveltyWeight: 0.2
-}
-```
-
-**Time-focused**:
-```typescript
-const params = {
-  dnsClusterNoveltyWeight: 0.3,
-  dnsTimeNoveltyWeight: 0.7
-}
-```
-
----
-
-## Diversity Reranking Parameters
-
-### Diversity Cap (N-in-K Rule)
-
-**Default**: `{ diversityCapN: 20, diversityCapK: 5 }`
-
-Within any N items, at most K from same cluster.
-
-**Examples**:
-
-**Strict diversity**:
-```typescript
-const params = {
-  diversityCapN: 15,
-  diversityCapK: 3 // Max 3 per 15 (20%)
-}
-```
-
-**Moderate diversity** (default):
-```typescript
-const params = {
-  diversityCapN: 20,
-  diversityCapK: 5 // Max 5 per 20 (25%)
-}
-```
-
-**Lenient diversity**:
-```typescript
-const params = {
-  diversityCapN: 20,
-  diversityCapK: 8 // Max 8 per 20 (40%)
-}
-```
-
-**No cluster caps** (disable):
-```typescript
-const params = {
-  diversityCapN: 1000,
-  diversityCapK: 1000
-}
-```
-
-### Exploration Budget
-
-Fraction of feed filled by random exploration.
-
-**Default**: `0.15` (15%)
-
-**Effects**:
-- **Lower (0.05-0.10)**: More predictable, relevance-focused
-  - Use for: Following feeds
-- **Higher (0.20-0.30)**: More serendipity
-  - Use for: Discovery feeds
-
-**Example**:
-```typescript
-// Following feed (low exploration)
-const params = {
-  explorationBudget: 0.05
-}
-
-// Discovery feed (high exploration)
-const params = {
-  explorationBudget: 0.25
-}
-```
-
-### MMR Lambda
-
-Balance between relevance and diversity in MMR reranking.
-
-**Default**: `0.15`
-
-**Formula**: `MMR = λ × relevance - (1 - λ) × similarity`
-
-**Effects**:
-- **Higher (0.8-0.9)**: Favor relevance (less diversity)
-- **Lower (0.5-0.6)**: Favor diversity (more variety)
-
-**Example**:
-```typescript
-// Relevance-focused
-const params = {
-  mmrLambda: 0.85
-}
-
-// Diversity-focused
-const params = {
-  mmrLambda: 0.55
 }
 ```
 
@@ -627,44 +405,21 @@ const params = {
 ### Home Mix (Balanced)
 ```typescript
 const HOME_MIX_PARAMS = {
-  weights: { prs: 0.55, cvs: 0.25, dns: 0.20 },
-  explorationBudget: 0.15,
-  diversityCapN: 20,
-  diversityCapK: 5,
-  mmrLambda: 0.70
-}
-```
-
-### Home Diverse (Discovery)
-```typescript
-const HOME_DIVERSE_PARAMS = {
-  weights: { prs: 0.20, cvs: 0.30, dns: 0.50 },
-  explorationBudget: 0.30,
-  diversityCapN: 15,
-  diversityCapK: 3,
-  mmrLambda: 0.60
+  weights: { prs: 0.70, cvs: 0.30 }
 }
 ```
 
 ### Following (Familiar)
 ```typescript
 const FOLLOWING_PARAMS = {
-  weights: { prs: 0.70, cvs: 0.20, dns: 0.10 },
-  explorationBudget: 0.05,
-  diversityCapN: 25,
-  diversityCapK: 8,
-  mmrLambda: 0.80
+  weights: { prs: 0.80, cvs: 0.20 }
 }
 ```
 
 ### Scenes (Cluster-focused)
 ```typescript
 const SCENES_PARAMS = {
-  weights: { prs: 0.40, cvs: 0.40, dns: 0.20 },
-  explorationBudget: 0.10,
-  diversityCapN: 20,
-  diversityCapK: 10, // More lenient within cluster
-  mmrLambda: 0.75
+  weights: { prs: 0.50, cvs: 0.50 }
 }
 ```
 
@@ -683,10 +438,9 @@ const params = { ...DEFAULT_PARAMS }
 ### 2. Identify Goal
 
 What are you optimizing for?
-- **Engagement**: Higher CVS weight, lower diversity
-- **Discovery**: Higher DNS weight, higher exploration
-- **Quality**: Higher CVS component for context/bridge
-- **Virality**: Higher like component, lower diversity
+- **Engagement**: Higher PRS weight
+- **Quality**: Higher CVS weight, context/bridge signals
+- **Virality**: Higher like component in CVS
 - **Balance**: Default params
 
 ### 3. Make Incremental Changes
@@ -695,13 +449,13 @@ Change one parameter at a time by small amounts:
 
 ```typescript
 // Baseline
-const baseline = { weights: { prs: 0.55, cvs: 0.25, dns: 0.20 } }
+const baseline = { weights: { prs: 0.70, cvs: 0.30 } }
 
-// Test: Slightly more diversity
-const test1 = { weights: { prs: 0.50, cvs: 0.25, dns: 0.25 } }
+// Test: More cultural value
+const test1 = { weights: { prs: 0.60, cvs: 0.40 } }
 
-// Test: Significantly more diversity
-const test2 = { weights: { prs: 0.40, cvs: 0.30, dns: 0.30 } }
+// Test: Quality-first
+const test2 = { weights: { prs: 0.50, cvs: 0.50 } }
 ```
 
 ### 4. Measure Impact
@@ -758,80 +512,6 @@ Based on results, refine parameters and repeat.
 
 ## Common Scenarios
 
-### "Feed is too repetitive"
-
-**Problem**: Same clusters/items keep appearing
-
-**Solutions**:
-1. Increase diversity weight:
-   ```typescript
-   weights: { prs: 0.45, cvs: 0.25, dns: 0.30 }
-   ```
-
-2. Stricter cluster caps:
-   ```typescript
-   diversityCapK: 3 // Down from 5
-   ```
-
-3. More exploration:
-   ```typescript
-   explorationBudget: 0.20 // Up from 0.15
-   ```
-
-4. Higher cluster novelty penalty:
-   ```typescript
-   clusterNoveltyFactor: 0.10 // Up from 0.06
-   ```
-
-### "Feed is too random"
-
-**Problem**: Irrelevant items, no coherence
-
-**Solutions**:
-1. Increase personal relevance:
-   ```typescript
-   weights: { prs: 0.65, cvs: 0.25, dns: 0.10 }
-   ```
-
-2. Reduce exploration:
-   ```typescript
-   explorationBudget: 0.08 // Down from 0.15
-   ```
-
-3. More lenient cluster caps:
-   ```typescript
-   diversityCapK: 7 // Up from 5
-   ```
-
-4. Higher MMR lambda (favor relevance):
-   ```typescript
-   mmrLambda: 0.80 // Up from 0.70
-   ```
-
-### "Not enough new content"
-
-**Problem**: Stale, old items dominate
-
-**Solutions**:
-1. Increase time novelty weight:
-   ```typescript
-   dnsTimeNoveltyWeight: 0.6 // Up from 0.4
-   dnsClusterNoveltyWeight: 0.4
-   ```
-
-2. Shorter time half-life:
-   ```typescript
-   timeHalfLifeHours: 48 // Down from 72
-   ```
-
-3. Lower support density prior:
-   ```typescript
-   publicMetrics: {
-     priorViews: 5, // Down from 10
-     priorLikes: 0
-   }
-   ```
-
 ### "Low-quality content ranks high"
 
 **Problem**: Spam, clickbait, low-effort posts succeed
@@ -839,7 +519,7 @@ Based on results, refine parameters and repeat.
 **Solutions**:
 1. Increase cultural value weight:
    ```typescript
-   weights: { prs: 0.45, cvs: 0.40, dns: 0.15 }
+   weights: { prs: 0.50, cvs: 0.50 }
    ```
 
 2. Emphasize context/bridge signals:
@@ -858,10 +538,24 @@ Based on results, refine parameters and repeat.
    likeDecayAlpha: 0.10 // Up from 0.05
    ```
 
-4. Higher spam penalty:
+### "Not enough new content"
+
+**Problem**: Stale, old items dominate
+
+**Solutions**:
+1. Lower support density prior:
    ```typescript
-   // In quality flags
-   spamSuspect: true → penalty = 0.3 (down from 0.5)
+   publicMetrics: {
+     priorViews: 5, // Down from 10
+     priorLikes: 0
+   }
+   ```
+
+2. Use feed configuration to prioritize recent posts:
+   ```typescript
+   // In feed-service.ts
+   clusterWindowDays: 2, // Down from 3
+   followingWindowDays: 5, // Down from 7
    ```
 
 ---

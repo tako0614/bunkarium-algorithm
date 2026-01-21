@@ -1,13 +1,13 @@
 # @bunkarium/algorithm
 
-Pure TypeScript recommendation algorithms focused on **cultural diversity**.
+Pure TypeScript recommendation algorithms focused on **cultural value**.
 
 **Stateless**, **DB-agnostic**, and designed as **composable functions** with a strict, versioned contract.
-Built for applications that want transparent, auditable, diversity-aware ranking without turning "likes" into a hard limit.
+Built for applications that want transparent, auditable ranking without turning "likes" into a hard limit.
 
 - **ALGORITHM_ID**: `bunkarium-culture-rank`
-- **ALGORITHM_VERSION**: `1.0.0`
-- **CONTRACT_VERSION**: `1.0`
+- **ALGORITHM_VERSION**: `2.0.0`
+- **CONTRACT_VERSION**: `2.0`
 
 ---
 
@@ -19,19 +19,18 @@ Bunkarium's approach is different:
 - Users can always react (likes are **always pressable**).
 - Reaction impact diminishes with volume (**diminishing weight**, not "blocked likes").
 - Public-facing metrics emphasize **ratios/density/distribution**, not raw totals.
-- Ranking is **multi-objective** (personal relevance + cultural value + diversity/novelty).
-- The final list is **diversity-aware reranked** (caps + MMR, optional DPP).
+- Ranking is **multi-objective** (personal relevance + cultural value).
 - Every exposure can carry **explainable reason codes** ("Why this?").
 
 ---
 
-## Features (Contract v1.0)
+## Features (Contract v2.0)
 
 ### Core ranking
 - Like decay (always pressable, diminishing weight)
+- Voting power: `votingPower = CR / n` (zero-sum design)
 - Public metrics based on **density / rate / breadth / persistence**
-- Multi-objective scoring (**PRS / CVS / DNS**)
-- Diversity-aware reranking (**cluster caps + MMR**, optional DPP)
+- Multi-objective scoring (**PRS / CVS**)
 - Deterministic results (same input → same output)
 - Explainable exposure reason codes
 
@@ -39,10 +38,11 @@ Bunkarium's approach is different:
 - Curator Reputation (**CR**) utilities (outcome-oriented, not follower count)
 - Culture Points (**CP**) issuance utilities (non-transferable, farming-resistant)
 - Cultural View Value (**CVV**) weighting utilities (value of attention, separate axis)
+- Delayed discovery evaluation (遅延評価型の発見CR)
 
 ### Evaluation (offline)
 - Concentration metrics (Gini, long-tail share)
-- Cluster coverage & novelty metrics
+- Cluster coverage metrics
 - Replay-style evaluation helpers (dataset snapshot in → report out)
 
 > This package does **not** do fraud detection, moderation decisions, or model training.
@@ -101,10 +101,7 @@ const response = await rank({
   ],
   context: { surface: 'home_mix', nowTs: Date.now() },
   params: {
-    weights: { prs: 0.55, cvs: 0.25, dns: 0.20 },
-    diversityCapN: 20,
-    diversityCapK: 5,
-    explorationBudget: 0.15
+    weights: { prs: 0.70, cvs: 0.30 }
   }
 })
 
@@ -233,10 +230,10 @@ All tests: **519 pass, 0 fail** (includes conformance, precision, and comprehens
 ### Main Functions
 
 #### `rank(request: RankRequest): Promise<RankResponse>`
-Full ranking pipeline (scoring + diversity reranking + reason codes).
+Full ranking pipeline (scoring + reason codes).
 
 #### `rankSync(request: RankRequest): RankResponse`
-Synchronous version (no async diversity algorithms).
+Synchronous version.
 
 #### `calculateLikeWeight(input: LikeWeightInput): LikeWeightOutput`
 Like decay calculation.
@@ -266,10 +263,7 @@ console.log(DEFAULT_PARAMS)
 // {
 //   likeWindowMs: 86400000,      // 24 hours
 //   likeDecayAlpha: 0.05,
-//   weights: { prs: 0.55, cvs: 0.25, dns: 0.20 },
-//   diversityCapN: 20,
-//   diversityCapK: 5,
-//   explorationBudget: 0.15,
+//   weights: { prs: 0.70, cvs: 0.30 },
 //   ...
 // }
 ```
@@ -280,27 +274,12 @@ See [Parameter Tuning](./docs/PARAMETERS.md) for optimization guide.
 
 ## Advanced Usage
 
-### Custom Similarity Function
-```typescript
-import { mmrRerank } from '@bunkarium/algorithm'
-
-const customSimilarity = (a, b) => {
-  // Your similarity logic
-  return 0.5
-}
-
-const reranked = mmrRerank(candidates, {
-  similarityFn: customSimilarity,
-  lambda: 0.7
-})
-```
-
 ### Surface-specific Parameters
 ```typescript
 function getParamsForSurface(surface: string) {
-  return surface === 'home_diverse'
-    ? { weights: { prs: 0.20, cvs: 0.30, dns: 0.50 } }
-    : { weights: { prs: 0.55, cvs: 0.25, dns: 0.20 } }
+  return surface === 'following'
+    ? { weights: { prs: 0.80, cvs: 0.20 } }
+    : { weights: { prs: 0.70, cvs: 0.30 } }
 }
 ```
 
@@ -321,12 +300,10 @@ console.log(comparison.improvement.giniCoefficient) // -0.15 (better!)
 ## Performance
 
 - **Primary scoring**: O(n) where n = candidates
-- **MMR reranking**: O(k²) where k = rerank limit (typically 200)
-- **DPP sampling**: O(k³) (use for small sets)
 
 Typical performance:
 - 1000 candidates → ~5ms (scoring only)
-- 200 candidates → ~15ms (full pipeline with MMR)
+- 200 candidates → ~8ms (full pipeline)
 
 ---
 
@@ -346,8 +323,7 @@ Contract version changes require major version bump.
 This package is part of the Bunkarium monorepo. See main repository for contribution guidelines.
 
 Key areas for improvement:
-- Performance optimization (especially DPP)
-- Additional diversity strategies
+- Performance optimization
 - More evaluation metrics
 - Documentation and examples
 
@@ -376,6 +352,12 @@ See main repository for license information.
 ---
 
 ## Changelog
+
+### v2.0.0 (2026-01-22)
+- Voting power simplified to `CR / n`
+- Scoring simplified to PRS + CVS
+- Cluster normalization removed (raw CR used)
+- Delayed discovery evaluation added
 
 ### v1.0.0 (2026-01-18)
 - Initial release

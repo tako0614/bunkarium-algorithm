@@ -82,8 +82,8 @@ const request: RankRequest = {
 │  └────────────┘  └────────────┘  └───────────┘ │
 │                                                  │
 │  ┌────────────┐  ┌────────────┐  ┌───────────┐ │
-│  │  Scoring   │  │  Reranking │  │  Explain  │ │
-│  │ PRS/CVS/DNS│  │  MMR/DPP   │  │   Codes   │ │
+│  │  Scoring   │  │  Ranking   │  │  Explain  │ │
+│  │  PRS/CVS   │  │            │  │   Codes   │ │
 │  └────────────┘  └────────────┘  └───────────┘ │
 │                                                  │
 │  ┌─────────────────────────────────────────┐   │
@@ -119,7 +119,6 @@ const request: RankRequest = {
       'cluster-a': 5,
       'cluster-b': 2
     },
-    diversitySlider: 0.6,       // User preference
     curatorReputation: 1.5,     // CR score
     cpEarned90d: 120            // CP total
   },
@@ -156,10 +155,7 @@ const request: RankRequest = {
   },
 
   params: {
-    weights: { prs: 0.55, cvs: 0.25, dns: 0.20 },
-    diversityCapN: 20,
-    diversityCapK: 5,
-    explorationBudget: 0.15
+    weights: { prs: 0.70, cvs: 0.30 }
   }
 }
 ```
@@ -173,19 +169,13 @@ Candidates (unranked)
   │
   ├─> Primary Scoring
   │   ├─> PRS (Personal Relevance Score)
-  │   ├─> CVS (Cultural Value Score)
-  │   └─> DNS (Diversity/Novelty Score)
+  │   └─> CVS (Cultural Value Score)
   │
-  ├─> Mixed Score = PRS * wprs + CVS * wcvs + DNS * wdns
+  ├─> Mixed Score = PRS * wprs + CVS * wcvs
   │
   ├─> Penalty Application (spam, low quality)
   │
-  ├─> Primary Ranking (by finalScore)
-  │
-  └─> Diversity Reranking
-      ├─> Cluster Caps (max K per N window)
-      ├─> Exploration Slots (random sampling)
-      └─> MMR/DPP (similarity-based diversity)
+  └─> Primary Ranking (by finalScore)
 
 Final Ranked List
   │
@@ -204,7 +194,6 @@ Final Ranked List
       scoreBreakdown: {
         prs: 0.6,
         cvs: 0.9,
-        dns: 0.7,
         penalty: 1.0
       }
     },
@@ -213,12 +202,10 @@ Final Ranked List
 
   metadata: {
     requestId: 'uuid',
-    contractVersion: '1.0',
+    contractVersion: '2.0',
     paramSetId: 'sha256-hash-of-params',
     totalCandidates: 150,
-    totalRanked: 20,
-    explorationCount: 3,
-    diversityApplied: true
+    totalRanked: 20
   }
 }
 ```
@@ -250,15 +237,9 @@ Final Ranked List
 - **Output**: Density, rate, breadth, persistence
 - **Purpose**: Show cultural impact, not raw popularity
 
-### Scoring (PRS/CVS/DNS)
+### Scoring (PRS/CVS)
 - **PRS**: Personal relevance (following, saved, liked sources)
 - **CVS**: Cultural value (like/context/collection/bridge/sustain signals)
-- **DNS**: Diversity/novelty (new clusters, recent posts)
-
-### Diversity Reranking
-- **Cluster Caps**: Limit same cluster repetition
-- **Exploration**: Random sampling for discovery
-- **MMR/DPP**: Similarity-based diversity
 
 ### Explain Codes
 - **Input**: Candidate features and scores
@@ -323,62 +304,17 @@ const breadth = totalWeight > 0 ? sumSquares / totalWeight : 0
 
 ### Time Complexity
 - Primary scoring: O(n) where n = candidate count
-- MMR reranking: O(k²) where k = rerank limit
-- DPP sampling: O(k³) where k = sample size
-- Full pipeline: O(n + k²) typically
+- Full pipeline: O(n) typically
 
 ### Space Complexity
 - O(n) for candidate storage
-- O(k) for reranking workspace
 - O(1) for metrics calculation (streaming)
 
 ### Optimization Tips
-1. **Limit reranking candidates** (`rerankMaxCandidates: 200`)
-2. **Use MMR over DPP** for better performance
-3. **Cache parameter hashes** if params don't change often
-4. **Batch requests** when possible (same user state)
+1. **Cache parameter hashes** if params don't change often
+2. **Batch requests** when possible (same user state)
 
 ## Extension Points
-
-### Custom Similarity Functions
-Implement `SimilarityFunction` interface:
-
-```typescript
-type SimilarityFunction = (
-  a: Candidate,
-  b: Candidate,
-  context?: any
-) => number
-
-const customSim: SimilarityFunction = (a, b) => {
-  // Your logic here
-  return 0.5
-}
-
-const reranked = mmrRerank(candidates, {
-  similarityFn: customSim
-})
-```
-
-### Custom Diversity Strategies
-Use `hybridDiversityRerank` with custom config:
-
-```typescript
-const reranked = hybridDiversityRerank(ranked, {
-  slidingWindow: {
-    enabled: true,
-    windowSize: 10,
-    similarityThreshold: 0.75
-  },
-  mmr: {
-    enabled: true,
-    lambda: 0.6
-  },
-  dpp: {
-    enabled: false
-  }
-})
-```
 
 ### Custom Reason Code Logic
 Extend `determineReasonCodes`:
