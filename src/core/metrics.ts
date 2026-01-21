@@ -72,11 +72,14 @@ export function calculateSupportDensity(
   const baseValue = Math.max(1e-10, qualifiedUniqueViewers + priorViews)
   const denominator = Math.pow(baseValue, safeBeta)
   // Guard: check for underflow (very small values) and overflow (Infinity/very large)
-  if (!Number.isFinite(denominator) || denominator < 1e-100 || denominator > 1e100) return 0
+  if (!Number.isFinite(denominator) || denominator < 1e-100) return 0
   const numerator = Math.max(0, weightedLikeSum + priorLikes)
   const result = numerator / denominator
-  // Guard: ensure non-negative result (should always be positive given guards above)
-  return Number.isFinite(result) ? Math.max(0, result) : 0
+  // For very large denominators, result will be very small but valid
+  // Only return 0 for truly invalid results (NaN, Infinity, negative)
+  if (!Number.isFinite(result) || result < 0) return 0
+  // Clamp extremely small values to prevent floating-point noise
+  return result < 1e-15 ? 0 : result
 }
 
 /**
@@ -97,7 +100,9 @@ export function calculateSupportRate(
   priorViews: number = 10,
   priorUniqueLikers: number = 1
 ): number {
-  const V = qualifiedUniqueViewers + priorViews
+  // Guard: ensure priors are valid to prevent division by zero when both are 0
+  const safePriorViews = Math.max(1, priorViews)
+  const V = qualifiedUniqueViewers + safePriorViews
   if (V <= 0) return 0
   const Lu = uniqueLikers + priorUniqueLikers
   const rate = Lu / V
@@ -122,7 +127,9 @@ export function calculateWeightedSupportIndex(
   priorViews: number = 10,
   priorLikes: number = 1
 ): number {
-  const V = qualifiedUniqueViewers + priorViews
+  // Guard: ensure priors are valid to prevent division by zero when both are 0
+  const safePriorViews = Math.max(1, priorViews)
+  const V = qualifiedUniqueViewers + safePriorViews
   if (V <= 0) return 0
   const Lw = weightedLikeSum + priorLikes
   return Lw / V
