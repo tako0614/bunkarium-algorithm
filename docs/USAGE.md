@@ -68,10 +68,7 @@ const request = {
   },
 
   params: {
-    weights: { prs: 0.55, cvs: 0.25, dns: 0.20 },
-    diversityCapN: 20,
-    diversityCapK: 5,
-    explorationBudget: 0.15
+    weights: { prs: 0.70, cvs: 0.30 }
   }
 }
 
@@ -83,7 +80,7 @@ console.log(response.ranked)
 //     itemKey: 'post-42',
 //     finalScore: 0.876543210,
 //     reasonCodes: ['HIGH_CVS', 'BRIDGE_SIGNAL'],
-//     scoreBreakdown: { prs: 0.6, cvs: 0.9, dns: 0.7, penalty: 1.0 }
+//     scoreBreakdown: { prs: 0.6, cvs: 0.9, penalty: 1.0 }
 //   },
 //   ...
 // ]
@@ -391,46 +388,6 @@ console.log(entries)
 // ]
 ```
 
-### Diversity Reranking
-
-Apply different reranking strategies:
-
-```typescript
-import { mmrRerank, dppSampleGreedy, hybridDiversityRerank } from '@bunkarium/algorithm'
-
-const ranked = primaryRank(candidates, userState, context, params)
-
-// MMR (fast, similarity-based)
-const mmrResult = mmrRerank(ranked, {
-  lambda: 0.7, // 70% relevance, 30% diversity
-  similarityFn: 'cosine', // or 'cluster', 'euclidean'
-  limit: 20
-})
-
-// DPP (slower, determinantal)
-const dppResult = dppSampleGreedy(ranked, {
-  sampleSize: 20,
-  qualityWeight: 1.0,
-  diversityWeight: 1.0
-})
-
-// Hybrid (combine strategies)
-const hybridResult = hybridDiversityRerank(ranked, {
-  slidingWindow: {
-    enabled: true,
-    windowSize: 10,
-    similarityThreshold: 0.8
-  },
-  mmr: {
-    enabled: true,
-    lambda: 0.7
-  },
-  dpp: {
-    enabled: false
-  }
-})
-```
-
 ### Explainability
 
 Generate reason codes:
@@ -440,13 +397,13 @@ import { determineReasonCodes, formatReasonCodes } from '@bunkarium/algorithm'
 
 const codes = determineReasonCodes(
   candidate,
-  { prs: 0.8, cvs: 0.6, dns: 0.3 },
+  { prs: 0.8, cvs: 0.6 },
   { surface: 'home_mix' },
-  { prs: 0.55, cvs: 0.25, dns: 0.20 }
+  { prs: 0.70, cvs: 0.30 }
 )
 
 console.log(codes)
-// ['HIGH_PRS', 'FOLLOWING', 'CONTEXT_SIGNAL', 'NEW_CLUSTER']
+// ['HIGH_PRS', 'FOLLOWING', 'CONTEXT_SIGNAL']
 
 const texts = formatReasonCodes(codes)
 console.log(texts)
@@ -460,26 +417,25 @@ import { generateDetailedExplanation, calculateContributionRates } from '@bunkar
 
 const explanation = generateDetailedExplanation(
   candidate,
-  { prs: 0.8, cvs: 0.6, dns: 0.3, penalty: 1.0 },
+  { prs: 0.8, cvs: 0.6, penalty: 1.0 },
   0.687654321,
   codes
 )
 
 console.log(explanation)
 // "このアイテムは、フォロー中のユーザーからの投稿で、
-//  コンテキスト反応が多く、新しいシーンの内容です。
-//  スコア: 0.688 (PRS: 80%, CVS: 60%, DNS: 30%)"
+//  コンテキスト反応が多いです。
+//  スコア: 0.688 (PRS: 80%, CVS: 60%)"
 
 const contributions = calculateContributionRates(
-  { prs: 0.8, cvs: 0.6, dns: 0.3 },
-  { prs: 0.55, cvs: 0.25, dns: 0.20 }
+  { prs: 0.8, cvs: 0.6 },
+  { prs: 0.70, cvs: 0.30 }
 )
 
 console.log(contributions)
 // {
-//   prs: 0.64,  // 64% of final score from PRS
-//   cvs: 0.22,  // 22% from CVS
-//   dns: 0.09   // 9% from DNS
+//   prs: 0.76,  // 76% of final score from PRS
+//   cvs: 0.24   // 24% from CVS
 // }
 ```
 
@@ -618,30 +574,6 @@ const reranked = mmrRerank(candidatesWithEmbeddings, {
 })
 ```
 
-### Dynamic Parameter Adjustment
-
-Adjust parameters based on user preferences:
-
-```typescript
-function getParamsForUser(user: User) {
-  const slider = user.settings.diversitySlider ?? 0.5 // 0.0-1.0
-
-  // More diversity → higher DNS weight, lower PRS weight
-  const dnsWeight = 0.15 + slider * 0.20 // 0.15-0.35
-  const prsWeight = 0.60 - slider * 0.15 // 0.45-0.60
-  const cvsWeight = 0.25 // Keep constant
-
-  return {
-    weights: { prs: prsWeight, cvs: cvsWeight, dns: dnsWeight },
-    explorationBudget: 0.10 + slider * 0.10, // 0.10-0.20
-    diversityCapK: slider > 0.7 ? 3 : 5 // Stricter caps for high diversity
-  }
-}
-
-const params = getParamsForUser(currentUser)
-const response = await rank({ ...request, params })
-```
-
 ### Surface-specific Configuration
 
 Different surfaces may need different parameters:
@@ -651,32 +583,22 @@ function getParamsForSurface(surface: string) {
   switch (surface) {
     case 'home_mix':
       return {
-        weights: { prs: 0.55, cvs: 0.25, dns: 0.20 },
-        explorationBudget: 0.15
-      }
-
-    case 'home_diverse':
-      return {
-        weights: { prs: 0.20, cvs: 0.30, dns: 0.50 },
-        explorationBudget: 0.30 // More exploration
+        weights: { prs: 0.70, cvs: 0.30 }
       }
 
     case 'following':
       return {
-        weights: { prs: 0.70, cvs: 0.20, dns: 0.10 },
-        explorationBudget: 0.05 // Less exploration
+        weights: { prs: 0.80, cvs: 0.20 }
       }
 
     case 'scenes':
       return {
-        weights: { prs: 0.40, cvs: 0.40, dns: 0.20 },
-        explorationBudget: 0.10
+        weights: { prs: 0.50, cvs: 0.50 }
       }
 
     default:
       return {
-        weights: { prs: 0.55, cvs: 0.25, dns: 0.20 },
-        explorationBudget: 0.15
+        weights: { prs: 0.70, cvs: 0.30 }
       }
   }
 }
@@ -794,22 +716,6 @@ console.log('Moderated candidates:',
 )
 ```
 
-### Low Diversity
-
-```typescript
-// Increase diversity parameters
-const params = {
-  ...request.params,
-  explorationBudget: 0.25, // Increase from 0.15
-  diversityCapK: 3,        // Reduce from 5
-  weights: {
-    prs: 0.40,  // Reduce PRS weight
-    cvs: 0.30,
-    dns: 0.30   // Increase DNS weight
-  }
-}
-```
-
 ### Score Debugging
 
 ```typescript
@@ -819,7 +725,6 @@ response.ranked.forEach((item, i) => {
   console.log(`   Score: ${item.finalScore.toFixed(6)}`)
   console.log(`   PRS: ${item.scoreBreakdown.prs.toFixed(3)}`)
   console.log(`   CVS: ${item.scoreBreakdown.cvs.toFixed(3)}`)
-  console.log(`   DNS: ${item.scoreBreakdown.dns.toFixed(3)}`)
   console.log(`   Penalty: ${item.scoreBreakdown.penalty.toFixed(3)}`)
   console.log(`   Reasons: ${item.reasonCodes.join(', ')}`)
 })

@@ -311,7 +311,7 @@ top_cluster_share = max(w_c) / Σ w_c
 
 ---
 
-## Scoring: PRS / CVS / DNS
+## Scoring: PRS / CVS
 
 ### Personal Relevance Score (PRS)
 
@@ -372,60 +372,15 @@ bridge = min(1.0, crossClusterEngagement / 10)
 sustain = min(1.0, persistenceDays / 30)
 ```
 
-### Diversity/Novelty Score (DNS)
-
-Combines cluster novelty and time novelty:
-
-```
-DNS = w_cluster × clusterNovelty
-    + w_time × timeNovelty
-```
-
-Default weights:
-- `w_cluster = 0.6`
-- `w_time = 0.4`
-
-**Cluster novelty**:
-```
-exposureCount = recentClusterExposures[clusterId] ?? 0
-
-clusterNovelty = exp(-k × exposureCount)
-```
-
-Where `k = 0.06` (default `clusterNoveltyFactor`).
-
-**Examples**:
-- 0 exposures: `novelty = 1.0` (fully novel)
-- 5 exposures: `novelty = 0.74`
-- 10 exposures: `novelty = 0.55`
-- 20 exposures: `novelty = 0.30`
-
-**Time novelty**:
-```
-age_hours = (nowTs - createdAt) / 3600000
-
-timeNovelty = 0.5^(age_hours / halfLife_hours)
-```
-
-Default `halfLife_hours = 72` (3 days).
-
-**Examples**:
-- 0 hours old: `novelty = 1.0`
-- 72 hours old: `novelty = 0.5`
-- 144 hours old: `novelty = 0.25`
-
 ### Mixed Score
 
 ```
-finalScore = w_prs × PRS
-           + w_cvs × CVS
-           + w_dns × DNS
+finalScore = w_prs × PRS + w_cvs × CVS
 ```
 
 Default weights:
-- `w_prs = 0.55`
-- `w_cvs = 0.25`
-- `w_dns = 0.20`
+- `w_prs = 0.70`
+- `w_cvs = 0.30`
 
 Then apply penalty:
 
@@ -434,85 +389,6 @@ penalty = spamSuspect ? 0.5 : 1.0
 
 finalScore_penalized = finalScore × penalty
 ```
-
----
-
-## Diversity Reranking
-
-### Cluster Caps (N-in-K Rule)
-
-Within any sliding window of N items, at most K items from same cluster.
-
-**Example** (N=20, K=5):
-```
-Position 0-19: Max 5 from cluster A
-Position 1-20: Max 5 from cluster A
-...
-```
-
-### Exploration Slots
-
-Random sampling for discovery:
-
-```
-explorationCount = floor(totalCount × explorationBudget)
-```
-
-Default `explorationBudget = 0.15` (15% of feed).
-
-Uses deterministic PRNG (Xorshift64) with `requestSeed`.
-
-### MMR (Maximal Marginal Relevance)
-
-Score each remaining candidate:
-
-```
-MMR(i) = λ × relevance(i) - (1 - λ) × max_j∈S similarity(i, j)
-```
-
-Where:
-- `λ`: Balance parameter (default 0.7)
-- `S`: Already selected items
-- `relevance(i)`: Normalized finalScore
-- `similarity(i, j)`: Cosine/cluster/custom similarity
-
-**Cosine similarity** (for embeddings):
-```
-sim(a, b) = (a · b) / (||a|| × ||b||)
-```
-
-Mapped to [0, 1]:
-```
-sim_01 = (sim + 1) / 2
-```
-
-**Cluster similarity**:
-```
-sim(a, b) = {
-  1.0   if a.clusterId === b.clusterId
-  0.0   otherwise
-}
-```
-
-### DPP (Determinantal Point Process)
-
-Builds kernel matrix:
-
-```
-K[i,j] = quality(i) × quality(j) × similarity(i, j)
-```
-
-Quality typically = finalScore.
-
-Sample k items by greedily maximizing log-determinant:
-
-```
-score(S ∪ {i}) = log det(K_S∪{i})
-```
-
-**Complexity**: O(k³) for k items.
-
-Use for small, high-quality diverse sets.
 
 ---
 
@@ -659,7 +535,6 @@ Use `Math.fround()` for deterministic 32-bit precision when needed.
 | Persistence | 0.0-∞ days | Reaction longevity |
 | PRS | 0.0-1.0 | Personal relevance |
 | CVS | 0.0-1.0 | Cultural value |
-| DNS | 0.0-1.0 | Novelty |
 | Final Score | 0.0-1.0 | Combined ranking |
 | Gini | 0.0-1.0 | Inequality |
 | Coverage | 0.0-1.0 | Cluster fraction |
