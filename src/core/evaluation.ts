@@ -149,12 +149,25 @@ export function calculateLongTailThreshold(
   // 露出数でソート (降順)
   const sorted = [...popularity].sort((a, b) => b.totalExposures - a.totalExposures)
 
+  // Guard: ensure sorted array is not empty (should not happen, but defensive)
+  if (sorted.length === 0) return 0
+
   // 上位N%のインデックス
   const safePercentile = Math.min(1, Math.max(0, topPercentile))
+
+  // Edge case: when percentile is 0, all items should be considered "tail"
+  // Return the maximum exposure (first item) as threshold so nothing qualifies as tail
+  if (safePercentile === 0) {
+    return sorted[0].totalExposures + 1  // +1 ensures nothing is <= this threshold
+  }
+
   const headCount = Math.max(1, Math.floor(sorted.length * safePercentile))
 
+  // Guard: ensure index is within bounds
+  const safeIndex = Math.min(headCount - 1, sorted.length - 1)
+
   // ヘッドとテールの境界値
-  return sorted[headCount - 1].totalExposures
+  return sorted[safeIndex].totalExposures
 }
 
 /**
@@ -177,9 +190,11 @@ export function calculateLongTailExposureRate(
   const threshold = calculateLongTailThreshold(popularity, topPercentile)
 
   // ロングテールアイテムのセット
+  // Use Math.floor on threshold to avoid floating-point comparison issues
+  const safeThreshold = Math.floor(threshold)
   const longTailItems = new Set(
     popularity
-      .filter(p => p.totalExposures <= threshold)
+      .filter(p => p.totalExposures <= safeThreshold)
       .map(p => p.itemId)
   )
 

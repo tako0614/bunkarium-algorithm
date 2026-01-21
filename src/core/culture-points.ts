@@ -466,7 +466,9 @@ export function resolveStake(
 
   if (outcome.isSuccess) {
     updatedStatus = 'success'
-    const bonus = Math.round(stake.stakedAmount * config.stake.successBonusRate)
+    // Guard: clamp stakedAmount to prevent integer overflow in multiplication
+    const safeStakedAmount = Math.min(stake.stakedAmount, Number.MAX_SAFE_INTEGER / 10)
+    const bonus = Math.round(safeStakedAmount * config.stake.successBonusRate)
     returnAmount = stake.stakedAmount + bonus
 
     if (bonus > 0) {
@@ -499,7 +501,9 @@ export function resolveStake(
     })
   } else {
     updatedStatus = 'failure'
-    const slashAmount = Math.round(stake.stakedAmount * config.stake.failureSlashRate)
+    // Guard: clamp stakedAmount to prevent integer overflow in multiplication
+    const safeStakedAmount = Math.min(stake.stakedAmount, Number.MAX_SAFE_INTEGER / 10)
+    const slashAmount = Math.round(safeStakedAmount * config.stake.failureSlashRate)
     returnAmount = stake.stakedAmount - slashAmount
 
     if (slashAmount > 0) {
@@ -600,19 +604,25 @@ export function detectCPFraud(
     fraudScore += 0.3
   }
 
+  // Use UTC hours for consistent timezone-independent fraud detection
   const nightEvents = userEntries.filter(e => {
-    const hour = new Date(e.timestamp).getHours()
+    const hour = new Date(e.timestamp).getUTCHours()
     return hour >= 2 && hour <= 5
   })
+  // Guard: only calculate night rate if there are entries to prevent division issues
   const nightRate = userEntries.length > 0
     ? nightEvents.length / userEntries.length
     : 0
   // Guard: validate thresholds are positive to prevent false positives
-  const safeNightRateThreshold = Math.max(0, fraudDetection.nightActivityRateThreshold)
+  // safeNightCountThreshold minimum is 1 to avoid triggering on empty/minimal data
+  const safeNightRateThreshold = Math.max(0.01, fraudDetection.nightActivityRateThreshold)
   const safeNightCountThreshold = Math.max(1, fraudDetection.nightActivityCountThreshold)
-  if (nightRate > safeNightRateThreshold &&
+  // Only flag if BOTH rate AND absolute count exceed thresholds
+  // This prevents false positives when userEntries is small
+  if (userEntries.length >= 5 &&  // Minimum sample size for meaningful rate
+      nightRate > safeNightRateThreshold &&
       nightEvents.length > safeNightCountThreshold) {
-    reasons.push(`Suspicious night activity: ${(nightRate * 100).toFixed(1)}%`)
+    reasons.push(`Suspicious night activity: ${(nightRate * 100).toFixed(1)}% (${nightEvents.length} events)`)
     fraudScore += 0.2
   }
 

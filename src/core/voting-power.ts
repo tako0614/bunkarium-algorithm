@@ -19,7 +19,7 @@
  */
 
 import type { CRConfig } from '../types'
-import { getCRMultiplier } from './reputation'
+import { getCRMultiplier, getCRLevel } from './reputation'
 import { DEFAULT_PARAMS } from '../types'
 import { LIKE_DECAY_DEFAULTS } from './defaults'
 
@@ -101,7 +101,9 @@ export function calculateVotingPower(input: VotingPowerInput): VotingPowerOutput
   // Final voting power: CR / n (ゼロサム設計を維持)
   // rapidMultiplierは投票力に影響しない（別軸で処理）
   const votingPower = baseWeight * crMultiplier
-  const votingPowerPercent = Math.round(votingPower * 100)
+  // Guard: prevent overflow with extremely large CR values
+  // Cap at 9999999% to avoid Infinity/NaN from Math.round
+  const votingPowerPercent = Math.min(9999999, Math.round(Math.max(0, votingPower * 100)))
 
   // CR level
   const crLevel = getCRLevel(input.curatorReputation)
@@ -121,12 +123,7 @@ export function calculateVotingPower(input: VotingPowerInput): VotingPowerOutput
   }
 }
 
-function getCRLevel(cr: number): 'explorer' | 'finder' | 'curator' | 'archiver' {
-  if (cr < 0.5) return 'explorer'
-  if (cr < 2.0) return 'finder'
-  if (cr < 5.0) return 'curator'
-  return 'archiver'
-}
+// getCRLevel is now imported from ./reputation to avoid duplication
 
 /**
  * Get voting power explanation text
@@ -169,8 +166,10 @@ export function predictNextVotingPower(
   curatorReputation: number,
   crConfig?: CRConfig
 ): VotingPowerOutput {
+  // Guard: ensure currentLikeCount is non-negative
+  const safeCurrentCount = Math.max(0, currentLikeCount)
   return calculateVotingPower({
-    likeWindowCount: currentLikeCount + 1,
+    likeWindowCount: safeCurrentCount + 1,
     curatorReputation,
     crConfig
   })
