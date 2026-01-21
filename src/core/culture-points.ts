@@ -129,7 +129,7 @@ export const DEFAULT_CP_CONFIG: CPIssuanceConfig = {
   diminishing: {
     windowHours: 24,
     rate: 0.1,                  // Increased from 0.05 for faster diminishing
-    minMultiplier: undefined    // No floor - can diminish to near-zero
+    minMultiplier: 0.05         // Floor at 5% to prevent degenerate near-zero issuance
   },
   stake: {
     defaultLockDays: 14,
@@ -235,6 +235,10 @@ export function calculateCPIssuance(
 
   const diminishingMultiplier = calculateCPDiminishingMultiplier(recentEventCount, config)
   // CR multiplier now has no limits - use directly
+  // Guard: warn if crMultiplier is negative (indicates data corruption)
+  if (crMultiplier < 0) {
+    console.warn(`[CP Issuance] Negative crMultiplier detected: ${crMultiplier}. Using 0.001 as fallback.`)
+  }
   const safeCrMultiplier = Math.max(0.001, crMultiplier)
   const amount = baseAmount * diminishingMultiplier * safeCrMultiplier
 
@@ -603,8 +607,11 @@ export function detectCPFraud(
   const nightRate = userEntries.length > 0
     ? nightEvents.length / userEntries.length
     : 0
-  if (nightRate > fraudDetection.nightActivityRateThreshold &&
-      nightEvents.length > fraudDetection.nightActivityCountThreshold) {
+  // Guard: validate thresholds are positive to prevent false positives
+  const safeNightRateThreshold = Math.max(0, fraudDetection.nightActivityRateThreshold)
+  const safeNightCountThreshold = Math.max(1, fraudDetection.nightActivityCountThreshold)
+  if (nightRate > safeNightRateThreshold &&
+      nightEvents.length > safeNightCountThreshold) {
     reasons.push(`Suspicious night activity: ${(nightRate * 100).toFixed(1)}%`)
     fraudScore += 0.2
   }

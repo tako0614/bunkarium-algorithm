@@ -77,9 +77,16 @@ export function calculateCR(
 
   let crDelta = 0
 
+  // Guard: ensure decayHalfLifeDays > 0 to prevent division by zero or unexpected behavior
+  // When halfLife = 0, all events have decay = 0 (instant decay), which may not be intended
+  const safeHalfLifeDays = Math.max(1, config.decayHalfLifeDays)
+  if (config.decayHalfLifeDays <= 0) {
+    console.warn(`[CR] decayHalfLifeDays=${config.decayHalfLifeDays} is invalid. Using 1 day as minimum.`)
+  }
+
   for (const event of events) {
     const ageDays = (now - event.timestamp) / (1000 * 60 * 60 * 24)
-    const decay = Math.pow(0.5, ageDays / config.decayHalfLifeDays)
+    const decay = Math.pow(0.5, ageDays / safeHalfLifeDays)
     const weight = getEventWeight(event.type, config.weights)
     crDelta += weight * decay
   }
@@ -149,10 +156,11 @@ export function calculateDiscoveryBonus(
   contentPopularity: number = 0.5,
   config?: DiscoveryBonusConfig
 ): { isDiscovery: boolean; bonusMultiplier: number; type: 'early' | 'cross_cluster' | 'none' } {
-  const threshold = config?.earlyDiscoveryThreshold ?? 0.2;
-  const earlyAndCrossBonus = config?.earlyAndCrossClusterBonus ?? 2.0;
-  const earlyOnlyBonus = config?.earlyOnlyBonus ?? 1.5;
-  const crossClusterOnlyBonus = config?.crossClusterOnlyBonus ?? 1.3;
+  // Validate and clamp config values to prevent unexpected behavior
+  const threshold = Math.max(0, Math.min(1, config?.earlyDiscoveryThreshold ?? 0.2));
+  const earlyAndCrossBonus = Math.max(1, config?.earlyAndCrossClusterBonus ?? 2.0);
+  const earlyOnlyBonus = Math.max(1, config?.earlyOnlyBonus ?? 1.5);
+  const crossClusterOnlyBonus = Math.max(1, config?.crossClusterOnlyBonus ?? 1.3);
 
   const isCrossCluster = !userTypicalClusters.includes(contentClusterId);
   const isEarlyDiscovery = contentPopularity < threshold;
