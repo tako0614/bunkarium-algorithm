@@ -1,5 +1,5 @@
 /**
- * Voting Power System
+ * Voting Power System (v2.0)
  *
  * 投票力は以下の要素で決定される:
  * 1. Base Weight (発言力配分): w(n) = 1 / n
@@ -8,11 +8,14 @@
  *    → 10回いいね: 0.1 × 10 = 1.0
  * 2. CR Multiplier (文化度): アンボンド
  *    → 文化的価値の高いユーザーは総発言力が大きい
- * 3. Rapid Decay (連打逓減): rapidMultiplier = 1 / (1 + β(n-1))
- *    → 30秒内の連打を抑制
  *
- * Final Voting Power = baseWeight × crMultiplier × rapidMultiplier
- * Total Daily Voting Power = CR × 1.0 (一定)
+ * Final Voting Power = baseWeight × crMultiplier = CR / n
+ * Total Daily Voting Power = CR × 1.0 (一定、ゼロサム)
+ *
+ * Rapid Detection (連打検出) は別軸で処理:
+ * - ゼロサム計算には影響しない
+ * - 30秒内の連打を検出しフラグを立てる
+ * - アプリケーション側でフィルタリングや警告に使用
  */
 
 import type { CRConfig } from '../types'
@@ -63,9 +66,10 @@ export interface VotingPowerOutput {
  * Calculate voting power based on CR and daily activity
  *
  * ゼロサム設計: どんなにいいねしても総発言力は一定
- * baseWeight = 1/n により、n回いいねの総発言力 = n × (1/n) = 1.0
+ * votingPower = CR / n
+ * 総発言力 = n × (CR/n) = CR (一定)
  *
- * 連打ペナルティは逓減式: rapidMultiplier = max(min, 1 / (1 + β(n-1)))
+ * 連打検出は別軸: isRapidフラグで検出、投票力には影響しない
  */
 export function calculateVotingPower(input: VotingPowerInput): VotingPowerOutput {
   const n = Math.max(1, input.likeWindowCount)
@@ -77,18 +81,26 @@ export function calculateVotingPower(input: VotingPowerInput): VotingPowerOutput
   // CR multiplier (アンボンド)
   const crMultiplier = getCRMultiplier(input.curatorReputation, input.crConfig)
 
-  // Rapid decay (逓減式、バイナリではない)
+  // Rapid detection (連打検出 - 別軸、投票力には影響しない)
+  // 30秒内の連打を検出しフラグを立てる
   const recentLikeCount30s = input.recentLikeCount30s ?? 0
   const beta = input.rapidDecayBeta ?? LIKE_DECAY_DEFAULTS.rapidDecayBeta
   const rapidMin = input.rapidPenaltyMin ?? LIKE_DECAY_DEFAULTS.rapidPenaltyMin
-  // 逓減式: rapidMultiplier = 1 / (1 + β(n-1))
+  // 連打レベル計算（情報提供用）
+  // Formula: 1 / (1 + β × (n - 1))
+  // With β=0.1: n=2→0.91, n=6→0.67, n=11→0.50
+  // With β=0.5: n=2→0.67, n=3→0.50, n=5→0.33
   const rawRapidMultiplier = 1 / (1 + beta * Math.max(0, recentLikeCount30s - 1))
   const rapidMultiplier = Math.max(rapidMin, rawRapidMultiplier)
-  // 連打判定は逓減が大きい場合(50%以下)
-  const isRapid = rapidMultiplier < 0.5
+  // 連打判定: 3回以上の30秒内いいねで警告（閾値ベースに変更）
+  // 旧: rapidMultiplier < 0.5 (beta=0.1では11回必要で実用的でない)
+  // 新: 直接回数で判定（より明確で調整しやすい）
+  const rapidThreshold = 3 // 30秒内に3回以上で連打と判定
+  const isRapid = recentLikeCount30s >= rapidThreshold
 
-  // Final voting power
-  const votingPower = baseWeight * crMultiplier * rapidMultiplier
+  // Final voting power: CR / n (ゼロサム設計を維持)
+  // rapidMultiplierは投票力に影響しない（別軸で処理）
+  const votingPower = baseWeight * crMultiplier
   const votingPowerPercent = Math.round(votingPower * 100)
 
   // CR level
@@ -99,7 +111,7 @@ export function calculateVotingPower(input: VotingPowerInput): VotingPowerOutput
     votingPowerPercent,
     baseWeight,
     crMultiplier,
-    rapidPenaltyMultiplier: rapidMultiplier,
+    rapidPenaltyMultiplier: rapidMultiplier, // 情報提供用（投票力には非適用）
     isRapid,
     breakdown: {
       dailyLikeCount: n,

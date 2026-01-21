@@ -75,7 +75,8 @@ export function calculateSupportDensity(
   if (!Number.isFinite(denominator) || denominator < 1e-100 || denominator > 1e100) return 0
   const numerator = Math.max(0, weightedLikeSum + priorLikes)
   const result = numerator / denominator
-  return Number.isFinite(result) ? result : 0
+  // Guard: ensure non-negative result (should always be positive given guards above)
+  return Number.isFinite(result) ? Math.max(0, result) : 0
 }
 
 /**
