@@ -781,14 +781,23 @@ export class EmbeddingCache {
   }
 
   get(key: string): Embedding | undefined {
-    return this.cache.get(key)
+    const value = this.cache.get(key)
+    if (value !== undefined) {
+      // LRU: Move to end by re-inserting (Map maintains insertion order)
+      this.cache.delete(key)
+      this.cache.set(key, value)
+    }
+    return value
   }
 
   set(key: string, embedding: Embedding): void {
-    if (this.cache.size >= this.maxSize) {
-      // LRU: 最初のエントリを削除
+    // If key exists, delete first to update insertion order
+    if (this.cache.has(key)) {
+      this.cache.delete(key)
+    } else if (this.cache.size >= this.maxSize) {
+      // LRU: Remove least recently used (first entry in insertion order)
       const firstKey = this.cache.keys().next().value
-      if (firstKey) {
+      if (firstKey !== undefined) {
         this.cache.delete(firstKey)
       }
     }

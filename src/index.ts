@@ -136,8 +136,25 @@ export {
   // Voting Power
   calculateVotingPower,
   getVotingPowerExplanation,
-  predictNextVotingPower
+  predictNextVotingPower,
+
+  // Numeric Utilities
+  applySoftCap,
+  safeDiv,
+  clamp,
+  round6,
+  isValidNumber,
+  safeMult,
 } from './core'
 
 // Version info
 export { ALGORITHM_ID, ALGORITHM_VERSION, CONTRACT_VERSION } from './constants'
+
+// Configuration
+export {
+  SOFT_CAPS,
+  TIME_WINDOWS,
+  DISCOVERY_CONFIG,
+  FEED_CONFIG,
+  CONTENT_LIMITS,
+} from './config'
