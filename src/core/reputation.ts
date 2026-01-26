@@ -7,6 +7,8 @@ export interface CREvent {
   type: CREventType
   timestamp: number
   metadata: Record<string, unknown>
+  /** Optional magnitude multiplier for variable-weight events like discovery */
+  magnitude?: number
 }
 
 export type CREventType =
@@ -21,6 +23,8 @@ export type CREventType =
   // Minority discovery bonus: rewarded when user discovers new value early
   | 'early_discovery'        // Liked content before it became popular
   | 'cross_cluster_discovery'  // Discovered value outside user's typical clusters
+  // Failed prediction penalty: penalized when liked content doesn't grow
+  | 'failed_discovery'       // Liked content that didn't gain popularity
 
 export interface CRWeights {
   noteAdopted: number
@@ -34,6 +38,8 @@ export interface CRWeights {
   // Minority discovery weights
   earlyDiscovery: number         // Bonus for early adoption of later-popular content
   crossClusterDiscovery: number  // Bonus for finding value in unfamiliar clusters
+  // Failed prediction penalty
+  failedDiscovery: number        // Penalty for liking content that doesn't grow
 }
 
 export const DEFAULT_CR_WEIGHTS: CRWeights = {
@@ -47,7 +53,9 @@ export const DEFAULT_CR_WEIGHTS: CRWeights = {
   qualityContribution: 0.08,
   // Discovery bonuses reward users who find new cultural value
   earlyDiscovery: 0.30,          // High reward for prescient taste
-  crossClusterDiscovery: 0.20    // Reward for expanding cultural horizons
+  crossClusterDiscovery: 0.20,   // Reward for expanding cultural horizons
+  // Failed prediction penalty
+  failedDiscovery: -0.15         // Penalty for bad taste (liking content that doesn't grow)
 }
 
 export interface CRFullConfig {
@@ -88,7 +96,10 @@ export function calculateCR(
     const ageDays = (now - event.timestamp) / (1000 * 60 * 60 * 24)
     const decay = Math.pow(0.5, ageDays / safeHalfLifeDays)
     const weight = getEventWeight(event.type, config.weights)
-    crDelta += weight * decay
+    // Use magnitude for variable-weight events (e.g., discoveryValue for discoveries)
+    // Default to 1.0 for events without magnitude
+    const magnitude = event.magnitude ?? 1.0
+    crDelta += weight * decay * magnitude
   }
 
   const alpha = config.learningRate ?? 0.1
@@ -119,6 +130,8 @@ function getEventWeight(type: CREventType, weights: CRWeights): number {
     // Minority discovery bonuses
     case 'early_discovery': return weights.earlyDiscovery
     case 'cross_cluster_discovery': return weights.crossClusterDiscovery
+    // Failed prediction penalty
+    case 'failed_discovery': return weights.failedDiscovery
     default: return 0
   }
 }
@@ -290,18 +303,17 @@ export function evaluateNoteSettlement(
  * The view weight represents the cultural value of attention from a specific viewer,
  * based on their reputation (CR) and recent contribution activity (CP earned).
  *
- * Formula (unbounded design):
+ * Formula:
  * - CRm = getCRMultiplier(curatorReputation) - direct CR value, no limits
- * - CPm = 1.0 + 0.2 × log10(1 + cpEarned90d/50) - no upper limit
- * - viewWeight = CRm × CPm - no artificial caps
+ * - CPm = clamp(1.0, 1.2, 1.0 + 0.2 × log10(1 + cpEarned90d/50))
+ * - viewWeight = CRm × CPm
  *
- * Note: In the new zero-sum design, raw viewWeight is unbounded. Cluster
- * normalization at the application level ensures total speaking power is constant.
+ * Note: CR is unbounded, but CPm is clamped to [1.0, 1.2] per spec.
  *
  * @param curatorReputation - The curator's reputation score (CR)
  * @param cpEarned90d - Culture Points earned in the last 90 days
  * @param config - Optional CR configuration for getCRMultiplier
- * @returns View weight (unbounded positive value)
+ * @returns View weight (CR unbounded, CPm clamped)
  */
 export function calculateViewWeight(
   curatorReputation: number,
@@ -311,18 +323,18 @@ export function calculateViewWeight(
   // Get CR multiplier (unbounded - direct CR value)
   const crMultiplier = getCRMultiplier(curatorReputation, config)
 
-  // Calculate CP multiplier (unbounded)
-  // CPm = 1.0 + 0.2 × log10(1 + cpEarned90d/50)
+  // Calculate CP multiplier (仕様: [1.0, 1.2]にクランプ)
+  // CPm = clamp(1.0, 1.2, 1.0 + 0.2 × log10(1 + cpEarned90d/50))
   // Guard: ensure cpBase is positive to avoid Math.log10(<=0) -> NaN/-Infinity
   const cpBase = Math.max(0.001, 1.0 + cpEarned90d / 50)
   const cpLog = Math.log10(cpBase)
   // Guard: ensure cpLog is finite
   const safeCpLog = Number.isFinite(cpLog) ? cpLog : 0
-  // No upper limit on CPm - higher CP = higher multiplier
-  const cpMultiplier = Math.max(1.0, 1.0 + 0.2 * safeCpLog)
+  // CPm clamped to [1.0, 1.2] per spec
+  const cpMultiplier = Math.min(1.2, Math.max(1.0, 1.0 + 0.2 * safeCpLog))
 
-  // Calculate final view weight (unbounded - cluster normalization handles zero-sum)
+  // Calculate final view weight (CR unbounded, CPm clamped)
   const viewWeight = crMultiplier * cpMultiplier
-  // Only ensure positive value (no upper limit)
+  // Only ensure positive value
   return Math.max(0.001, viewWeight)
 }

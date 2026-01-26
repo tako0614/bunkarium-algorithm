@@ -57,8 +57,8 @@ export const REPUTATION_DEFAULTS = {
   maxCR: undefined as number | undefined,
   /** 時間減衰の半減期（日） */
   decayHalfLifeDays: 90,
-  /** CR更新の学習率 */
-  learningRate: 0.2,
+  /** CR更新の学習率 (仕様: 0.1) */
+  learningRate: 0.1,
   /** イベント重み */
   eventWeights: {
     noteAdopted: 0.15,
@@ -72,7 +72,9 @@ export const REPUTATION_DEFAULTS = {
     /** 少数派発見ボーナス: 後に人気になるコンテンツを早期発見 */
     earlyDiscovery: 0.30,
     /** 普段と異なるクラスタで価値を発見 */
-    crossClusterDiscovery: 0.20
+    crossClusterDiscovery: 0.20,
+    /** 予測失敗ペナルティ: いいねした投稿が伸びなかった */
+    failedDiscovery: -0.15
   },
   /** ブリッジ成功の反応タイプ重み */
   bridgeReactionWeights: {
