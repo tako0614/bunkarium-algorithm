@@ -28,7 +28,7 @@ Bunkarium's approach is different:
 
 ### Core ranking
 - Like decay (always pressable, diminishing weight)
-- Voting power: `votingPower = CR / n` (zero-sum design)
+- Voting power: `votingPower = CR` (each like carries full CR weight)
 - Public metrics based on **density / rate / breadth / persistence**
 - Multi-objective scoring (**PRS / CVS**)
 - Deterministic results (same input → same output)
@@ -362,6 +362,11 @@ See main repository for license information.
 ---
 
 ## Changelog
+
+### v2.1.0 (2026-01-26)
+- Voting power simplified to `CR` (removed /n division)
+- Each like now carries full CR weight
+- Discovery evaluation refactored
 
 ### v2.0.0 (2026-01-22)
 - Voting power simplified to `CR / n`
