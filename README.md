@@ -244,6 +244,16 @@ Cultural impact metrics (density, breadth, persistence).
 #### `calculateCR(events: CREvent[], config?: Partial<CRConfig>): CRResult`
 Curator reputation from historical events.
 
+**CR Event Types**:
+- `early_discovery` (+0.30 × magnitude): 小さい投稿を発見して伸びた
+- `failed_discovery` (-0.15 × magnitude): いいねした投稿が伸びなかった
+- `cross_cluster_discovery` (+0.20): 自分のクラスタ外で発見
+- `bridge_success`, `note_adopted`, `stake_success/failure`, `spam_flag`
+
+**Discovery Evaluation (非対称設計)**:
+- 成功: `discoveryValue = growth × (1/popularity)` → 小さい投稿ほど大ボーナス
+- 失敗: `failureValue = stagnation × (1+popularity)` → デカい投稿ほど大ペナルティ
+
 #### `calculateCPIssuance(eventType: CPEventType, recentEventCount: number, curatorReputation?: number): CPIssuanceResult`
 Culture Points issuance with diminishing.
 
